@@ -186,13 +186,10 @@ class CRMQueueService {
                 await (conn.api as any).sendMessage({ msg: text }, threadId, threadType);
             }
             const imgs = (block.images || []).filter(Boolean);
-            if (imgs.length === 1) {
+            if (imgs.length > 0) {
                 await new Promise(r => setTimeout(r, 500));
-                await (conn.api as any).sendImage(imgs[0], threadId, threadType);
-            } else if (imgs.length > 1) {
-                // Batch send all images in one call
-                await new Promise(r => setTimeout(r, 500));
-                await (conn.api as any).sendImages(imgs, threadId, threadType);
+                // zca-js không có sendImage/sendImages — dùng sendMessage với attachments
+                await (conn.api as any).sendMessage({ msg: '', attachments: imgs }, threadId, threadType);
             }
         };
 

@@ -760,7 +760,7 @@ class WorkflowEngineService {
                 try {
                   const tempPath = await this.downloadUrlToTempFile(String(url));
                   try {
-                    const res = await api.sendImage(tempPath, cfg.threadId, threadType);
+                    const res = await api.sendMessage({ msg: '', attachments: [tempPath] }, cfg.threadId, threadType);
                     lastMsgId = (res as any)?.message?.msgId || lastMsgId;
                   } finally {
                     try { fs.unlinkSync(tempPath); } catch {}
@@ -805,8 +805,8 @@ class WorkflowEngineService {
       case 'zalo.sendImage': {
         const api = this.getApi(ctx.pageId);
         const threadType = Number(cfg.threadType) === 1 ? 1 : 0;
-        const result = await api.sendImage(cfg.filePath, cfg.threadId, threadType, cfg.message);
-        return { msgId: (result as any)?.msgId || '', success: true };
+        const result = await api.sendMessage({ msg: cfg.message || '', attachments: [cfg.filePath] }, cfg.threadId, threadType);
+        return { msgId: (result as any)?.message?.msgId || '', success: true };
       }
 
       case 'zalo.sendFile': {
