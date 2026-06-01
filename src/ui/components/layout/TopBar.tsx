@@ -145,7 +145,7 @@ export default function TopBar() {
       style={{ WebkitAppRegion: 'drag' } as any}
     >
       <div className="flex items-center gap-2 px-3" style={{ WebkitAppRegion: 'no-drag' } as any}>
-        <span className="text-blue-400 font-bold text-sm">Deplao</span>
+        <span className="text-blue-400 font-bold text-sm">Raymond</span>
         <span className="text-gray-500 text-xs">v{APP_VERSION}</span>
 
         {/* Workspace switcher — only shows when multiple workspaces exist */}
@@ -322,7 +322,7 @@ export default function TopBar() {
         <button
           onClick={() => ipc.shell?.openExternal(SUPPORT_GITHUB_URL)}
           className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-yellow-400 transition-colors"
-          title={"⭐ Star Deplao trên GitHub\nDự án mã nguồn mở — báo lỗi, đóng góp tính năng tại github.com/babyvibe/deplao-builder"}
+          title={"⭐ Star Raymond trên GitHub\nDự án mã nguồn mở — báo lỗi, đóng góp tính năng tại github.com/babyvibe/deplao-builder"}
         >
           {/* GitHub icon với star overlay */}
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">

@@ -106,7 +106,7 @@ app.commandLine.appendSwitch('lang', 'vi-VN');
 app.commandLine.appendSwitch('accept-lang', 'vi-VN,vi;q=0.9');
 
 // Đặt tên app (hiện trên taskbar, tray, macOS dock)
-app.setName('Deplao');
+app.setName('Raymond');
 
 // Windows: đặt AppUserModelId để taskbar/notification hiển thị đúng icon & tên
 // Dev: AUMID unique mỗi lần chạy → Windows tạo icon cache mới → hiện đúng icon
@@ -157,7 +157,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Deplao',
+    title: 'Raymond',
     // Windows: frameless → custom title bar
     // macOS: hiddenInset → ẩn title bar, giữ traffic light buttons
     frame: isMac,
@@ -339,7 +339,7 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Mở Deplao',
+      label: 'Mở Raymond',
       click: () => { mainWindow?.show(); mainWindow?.focus(); },
     },
     { type: 'separator' },
@@ -354,7 +354,7 @@ function createTray() {
     },
   ]);
 
-  tray.setToolTip('Deplao');
+  tray.setToolTip('Raymond');
   tray.setContextMenu(contextMenu);
 
   // Double-click tray → mở app
@@ -465,7 +465,7 @@ function registerWindowControls() {
             tray?.setImage(cachedDotIcon);
           }
         }
-        tray?.setToolTip(`Deplao — ${count} tin chưa đọc`);
+        tray?.setToolTip(`Raymond — ${count} tin chưa đọc`);
       } else {
         if (currentIconIsDot) {
           currentIconIsDot = false;
@@ -474,7 +474,7 @@ function registerWindowControls() {
             tray?.setImage(cachedNormalIcon);
           }
         }
-        tray?.setToolTip('Deplao');
+        tray?.setToolTip('Raymond');
       }
     } else {
       try { app.setBadgeCount(count > 0 ? count : 0); } catch {}
