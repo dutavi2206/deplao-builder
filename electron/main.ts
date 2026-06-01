@@ -106,7 +106,7 @@ app.commandLine.appendSwitch('lang', 'vi-VN');
 app.commandLine.appendSwitch('accept-lang', 'vi-VN,vi;q=0.9');
 
 // Đặt tên app (hiện trên taskbar, tray, macOS dock)
-app.setName('Raymond');
+app.setName('Deplao'); // userData path & safeStorage key — KHÔNG đổi để tránh mất dữ liệu
 
 // Windows: đặt AppUserModelId để taskbar/notification hiển thị đúng icon & tên
 // Dev: AUMID unique mỗi lần chạy → Windows tạo icon cache mới → hiện đúng icon
