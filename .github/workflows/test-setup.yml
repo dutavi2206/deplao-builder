@@ -1,0 +1,48 @@
+name: Test setup.ps1
+
+on:
+  workflow_dispatch:  # Chạy tay từ GitHub UI
+
+jobs:
+  test-setup:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Runner đã có Node 20 — gỡ để giả lập máy cài sẵn Node đúng version
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Chạy setup.ps1 với -BuildOnly (bỏ qua cài Node/Git vì runner đã có)
+      # và -DevMode=false để tự chọn build
+      - name: Run setup.ps1 (install + build)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File setup.ps1 -BuildOnly
+        env:
+          # Tự động chọn option 1 (build production) không cần input
+          CI: true
+
+      - name: Kiểm tra output
+        shell: pwsh
+        run: |
+          if (Test-Path "dist-electron-build\*.exe") {
+            $exe = Get-ChildItem "dist-electron-build\*.exe" | Select-Object -First 1
+            Write-Host "BUILD OK: $($exe.Name) ($([math]::Round($exe.Length/1MB, 1)) MB)"
+          } else {
+            Write-Host "BUILD FAILED: Không tìm thấy .exe"
+            exit 1
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-build-test
+          path: dist-electron-build/*.exe
+          retention-days: 1
