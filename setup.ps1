@@ -284,15 +284,32 @@ switch ($choice.Trim()) {
         Write-Info ""
         npm run production
         Write-Host ""
-        if (Test-Path "dist-electron-build") {
-            $exeFile = Get-ChildItem "dist-electron-build\*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($exeFile) {
-                Write-OK "Build successful!"
-                Write-Info "Installer: $($exeFile.FullName)"
-                Write-Info "Portable:  dist-electron-build\win-unpacked\Deplao.exe"
+
+        $portable = "dist-electron-build\win-unpacked\Deplao.exe"
+        $installer = Get-ChildItem "dist-electron-build\*.exe" -Exclude "win-unpacked" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if (Test-Path $portable) {
+            Write-OK "Build successful!"
+            Write-Info "Installer: $($installer.FullName)"
+            Write-Info "Portable:  $portable"
+            Write-Host ""
+            Write-Step "Launching app..."
+            Start-Process $portable
+            Write-OK "App started."
+        } elseif ($installer) {
+            Write-OK "Build successful! Running installer..."
+            Start-Process $installer.FullName -ArgumentList "/S" -Wait
+            Write-OK "Installed. Launching app..."
+            $appExe = "$env:LOCALAPPDATA\Programs\Deplao\Deplao.exe"
+            if (Test-Path $appExe) {
+                Start-Process $appExe
+                Write-OK "App started."
             } else {
-                Write-OK "Build done. Check dist-electron-build\ folder."
+                Write-Info "App installed. Find Deplao in Start Menu to launch."
             }
+        } else {
+            Write-Fail "Build failed - no .exe found in dist-electron-build\"
+            exit 1
         }
     }
     "2" {
