@@ -1349,12 +1349,15 @@ export default function MessageInput() {
         thread_type: activeThreadType, sender_id: activeAccountId, content: tempContent,
         msg_type: tempMsgType, timestamp: Date.now(), is_sent: 1, status: 'sending',
       });
-      await ipc.zalo?.sendMessage({
+      const sendResult = await ipc.zalo?.sendMessage({
         auth, threadId: activeThreadId, type: activeThreadType, message: msgText,
         ...(quotePayload ? { quote: quotePayload } : {}),
         ...(mentions.length > 0 ? { mentions } : {}),
         ...(finalStyles ? { styles: finalStyles } : {}),
       });
+      if (sendResult && sendResult.success === false) {
+        showNotification('Gửi thất bại: ' + (sendResult.error || 'Lỗi không xác định'), 'error');
+      }
       // Đánh dấu "đã trả lời" cho conversation này
       if (activeAccountId) markReplied(activeAccountId, activeThreadId);
       } // end else (Zalo path)
