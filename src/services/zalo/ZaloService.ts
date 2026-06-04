@@ -318,7 +318,9 @@ export default class ZaloService {
 
             return await apiSending.sendMessage(messageContent, threadId, type);
         } catch (error: any) {
-            throw new Error("Error sending message: " + error.message || error);
+            const code = error?.code ?? error?.error_code ?? '';
+            const detail = `threadId=${threadId} type=${type} zaloId=${this.zaloId} code=${code}`;
+            throw new Error(`Error sending message: ${error.message} [${detail}]`);
         } finally {
             // Xóa các file tạm thời sau khi gửi
             if (filesPath.length > 0) {
