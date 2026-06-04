@@ -96,11 +96,13 @@
       "dist-electron/**/*",
       "resources/**/*",
       "node_modules/ffmpeg-static/**/*",
+      "node_modules/cloudflared/**/*",
       "package.json"
     ],
     "asarUnpack": [
       "resources/icons/**",
-      "node_modules/better-sqlite3/**"
+      "node_modules/better-sqlite3/**",
+      "node_modules/cloudflared/**"
     ],
     "afterPack": "./scripts/after-pack.js",
     "win": {
