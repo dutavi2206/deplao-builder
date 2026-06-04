@@ -1350,7 +1350,7 @@ export default function MessageInput() {
         msg_type: tempMsgType, timestamp: Date.now(), is_sent: 1, status: 'sending',
       });
       const sendResult = await ipc.zalo?.sendMessage({
-        auth, threadId: activeThreadId, type: activeThreadType, message: msgText,
+        auth, zaloId: activeAccountId, threadId: activeThreadId, type: activeThreadType, message: msgText,
         ...(quotePayload ? { quote: quotePayload } : {}),
         ...(mentions.length > 0 ? { mentions } : {}),
         ...(finalStyles ? { styles: finalStyles } : {}),
