@@ -139,6 +139,14 @@ export default class ZaloService {
         }
     }
 
+    /** Get existing ZaloService instance by zaloId without needing auth credentials. */
+    public static getByZaloId(zaloId: string): ZaloService | null {
+        for (const instance of this.instances.values()) {
+            if (instance.zaloId === zaloId) return instance;
+        }
+        return null;
+    }
+
     /**
      * Khởi tạo API Zalo cho instance hiện tại
      * SỬ DỤNG ConnectionManager làm single source of truth

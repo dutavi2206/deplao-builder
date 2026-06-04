@@ -596,13 +596,13 @@ class HttpRelayService {
             if (params?.auth !== undefined) {
                 const realAuth = this.resolveRealAuth(zaloId, params.auth);
                 if (realAuth) {
-                    params = { ...params, auth: realAuth, _fromRelay: true };
+                    params = { ...params, auth: realAuth, _fromRelay: true, _relayZaloId: zaloId };
                 } else if (zaloId) {
                     Logger.warn(`[HttpRelayService] Proxy: could not resolve real auth for zaloId=${zaloId}, channel=${channel}`);
-                    params = { ...params, _fromRelay: true };
+                    params = { ...params, _fromRelay: true, _relayZaloId: zaloId };
                 }
             } else {
-                params = { ...params, _fromRelay: true };
+                params = { ...params, _fromRelay: true, _relayZaloId: zaloId };
             }
 
             // Use handler registry

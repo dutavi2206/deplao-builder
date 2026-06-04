@@ -73,7 +73,20 @@ function wrap(channel: string, fn: (service: ZaloService, params: any) => Promis
             // ───────────────────────────────────────────────────────────
 
             // Strip relay flag before passing to service
-            const { auth, isReconnection = false, _fromRelay, ...rest } = params;
+            const { auth, isReconnection = false, _fromRelay, _relayZaloId, ...rest } = params;
+
+            // ─── Relay path: dùng ZaloService instance đang chạy theo zaloId ──
+            // Bypass auth cookie lookup để tránh tạo instance mới với cookies sai format
+            if (_fromRelay && _relayZaloId) {
+                const relayService = ZaloService.getByZaloId(_relayZaloId);
+                if (!relayService) {
+                    return { success: false, error: `Tài khoản ${_relayZaloId} chưa kết nối.` };
+                }
+                const result = await fn(relayService, rest);
+                return { success: true, response: result };
+            }
+            // ────────────────────────────────────────────────────────────────────
+
             if (!auth) return { error: 'Missing auth' };
 
             const zaloId = resolveZaloId(auth);
