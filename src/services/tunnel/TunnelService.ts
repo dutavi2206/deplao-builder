@@ -27,6 +27,7 @@ try {
   // Fix: khi chạy từ asar, __dirname trỏ vào app.asar — binary thật nằm ở app.asar.unpacked
   if (bin && bin.includes('app.asar') && !bin.includes('app.asar.unpacked')) {
     bin = bin.replace('app.asar', 'app.asar.unpacked');
+    cf.use(bin); // cập nhật path trong cloudflared internal để Tunnel.spawn dùng đúng
   }
 } catch {
   Logger.warn('[TunnelService] cloudflared package not found');
