@@ -918,6 +918,15 @@ class HttpRelayService {
 
         Logger.log(`[HttpRelayService] 📡 SSE stream opened for ${employee.display_name}`);
 
+        // Push fresh initialState on every SSE (re)connect so client always has up-to-date
+        // assignedAccounts and permissions — fixes stale state after Mac sleep/wake
+        setTimeout(() => {
+            const snapshot = this.buildEmployeeSnapshot(employee.employee_id);
+            if (snapshot) {
+                this.pushViaSSE(employee.employee_id, 'relay:initialState', snapshot);
+            }
+        }, 500);
+
         // Push initial snapshot via SSE
         try {
             const snapshot = this.buildEmployeeSnapshot(employee.employee_id);
