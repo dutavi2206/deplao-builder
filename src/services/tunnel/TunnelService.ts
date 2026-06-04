@@ -59,7 +59,8 @@ export const TunnelService = {
     Logger.log(`[TunnelService] Starting Cloudflare Quick Tunnel on port ${port}...`);
 
     return new Promise((resolve, reject) => {
-      const tunnel = Tunnel.quick(`http://localhost:${port}`);
+      // Force protocol http2 (port 7844) as fallback when port 443 is blocked
+      const tunnel = Tunnel.quick(`http://localhost:${port}`, { '--protocol': 'http2' });
       let resolved = false;
 
       const timeout = setTimeout(() => {
