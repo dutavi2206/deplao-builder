@@ -812,11 +812,7 @@ class WorkflowEngineService {
         const api = this.getApi(ctx.pageId);
         const threadType = Number(cfg.threadType) === 1 ? 1 : 0;
         const result = await api.sendMessage({ msg: cfg.message || '', attachments: [cfg.filePath] }, cfg.threadId, threadType);
-<<<<<<< HEAD
-        return { msgId: (result as any)?.message?.msgId || '', success: true };
-=======
-        return { msgId: (result as any)?.attachment?.[0]?.msgId || '', success: true };
->>>>>>> origin/main
+        return { msgId: (result as any)?.attachment?.[0]?.msgId || (result as any)?.message?.msgId || '', success: true };
       }
 
       case 'zalo.sendFile': {
