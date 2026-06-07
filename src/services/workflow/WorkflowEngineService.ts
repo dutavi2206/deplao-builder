@@ -846,7 +846,7 @@ class WorkflowEngineService {
           const auth = conn?.auth ? JSON.stringify(conn.auth) : null;
           if (!auth) throw new Error(`Tài khoản ${ctx.pageId} không có auth`);
           const result = await handler(null, { auth, userId: cfg.userId });
-          if (result?.error && !result?.success) throw new Error(result.error);
+          if (result?.error && !result?.success) throw new Error(`${result.error} [userId=${cfg.userId} pageId=${ctx.pageId}]`);
         } else {
           const api = this.getApi(ctx.pageId);
           await api.acceptFriendRequest(cfg.userId);
