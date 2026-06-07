@@ -32,7 +32,6 @@ const NODE_GROUP_MAP: Record<string, ComponentType<NodeProps>> = {
   'kiotviet': IntegrationNode,
   'haravan': IntegrationNode,
   'sapo': IntegrationNode,
-  'ipos': IntegrationNode,
   'nhanh': IntegrationNode,
   'ghn': IntegrationNode,
   'ghtk': IntegrationNode,

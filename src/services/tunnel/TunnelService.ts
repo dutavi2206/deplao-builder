@@ -13,6 +13,7 @@
  *   TunnelService.stop();
  */
 
+import path from 'path';
 import Logger from '../../utils/Logger';
 
 let Tunnel: any = null;
@@ -24,10 +25,15 @@ try {
   Tunnel = cf.Tunnel;
   bin = cf.bin;
   install = cf.install;
-  // Fix: khi chạy từ asar, __dirname trỏ vào app.asar — binary thật nằm ở app.asar.unpacked
-  if (bin && bin.includes('app.asar') && !bin.includes('app.asar.unpacked')) {
+
+  // Fix binary path when running inside Electron asar archive.
+  // cf.bin uses __dirname which resolves inside app.asar. We must use cf.use()
+  // to update the module-scope bin variable that Tunnel.quick() reads via
+  // import_constants.bin — a local assignment wouldn't propagate.
+  if (bin && bin.includes('app.asar') && typeof cf.use === 'function') {
     bin = bin.replace('app.asar', 'app.asar.unpacked');
-    cf.use(bin); // cập nhật path trong cloudflared internal để Tunnel.spawn dùng đúng
+    cf.use(bin);  // ← writes into constants.js module-scope
+    Logger.log(`[TunnelService] Rewrote bin path for asar: ${bin}`);
   }
 } catch {
   Logger.warn('[TunnelService] cloudflared package not found');

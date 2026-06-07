@@ -49,6 +49,12 @@ interface Field {
   /** Ẩn field khi config[hideWhenKey] === hideWhenValue */
   hideWhenKey?: string;
   hideWhenValue?: string;
+  /** Khi field này thay đổi, xoá các key con này khỏi config (vd: platform → model) */
+  clearsKeyOnChange?: string[];
+  /** Lọc options theo giá trị field khác: key=field cần check, map=giá_trị→values_được_hiển_thị */
+  optionsFilter?: { key: string; map: Record<string, string[]> };
+  /** Giá trị tối thiểu cho number input */
+  min?: number;
 }
 
 interface LoadedLabelOption {
@@ -863,6 +869,60 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
         { value: 'mistral',  label: '🌀 Mistral AI' },
       ],
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
+      clearsKeyOnChange: ['model'],
+    },
+    {
+      key: 'model', label: 'Model AI', type: 'select',
+      desc: 'Chọn model phù hợp với nền tảng đã chọn ở trên.',
+      options: [
+        // OpenAI
+        { value: 'gpt-5.4',          label: '🤖 GPT-5.4 — Flagship mới nhất (OpenAI)' },
+        { value: 'gpt-5.4-pro',      label: '🤖 GPT-5.4 Pro — Thông minh nhất (OpenAI)' },
+        { value: 'gpt-5.4-mini',     label: '🤖 GPT-5.4 Mini — Code, subagent (OpenAI — khuyến nghị)' },
+        { value: 'gpt-5.4-nano',     label: '🤖 GPT-5.4 Nano — Siêu rẻ (OpenAI)' },
+        { value: 'gpt-5-mini',       label: '🤖 GPT-5 Mini — Cân bằng, giá tốt (OpenAI)' },
+        { value: 'gpt-5-nano',       label: '🤖 GPT-5 Nano — Nhanh, rẻ nhất (OpenAI)' },
+        { value: 'gpt-5',            label: '🤖 GPT-5 — Lý luận mạnh (OpenAI)' },
+        { value: 'o4-mini',          label: '🤖 o4-mini — Lý luận nhanh (OpenAI)' },
+        { value: 'o3',               label: '🤖 o3 — Lý luận mạnh (OpenAI)' },
+        { value: 'gpt-4.1',          label: '🤖 GPT-4.1 — Legacy non-reasoning (OpenAI)' },
+        // Gemini
+        { value: 'gemini-3.5-flash',        label: '💎 Gemini 3.5 Flash — Mới nhất (Google — khuyến nghị)' },
+        { value: 'gemini-3.1-pro-preview',  label: '💎 Gemini 3.1 Pro Preview — Mạnh nhất (Google)' },
+        { value: 'gemini-3-flash-preview',  label: '💎 Gemini 3 Flash Preview — Nhanh (Google)' },
+        { value: 'gemini-2.5-pro',          label: '💎 Gemini 2.5 Pro — Legacy ổn định (Google)' },
+        // Claude (Anthropic)
+        { value: 'claude-4.6-sonnet-20260301',  label: '🟠 Claude 4.6 Sonnet — Mới nhất (Anthropic — khuyến nghị)' },
+        { value: 'claude-4.5-sonnet-20260115',  label: '🟠 Claude 4.5 Sonnet — Cân bằng (Anthropic)' },
+        { value: 'claude-4.0-haiku-20260101',   label: '🟠 Claude 4.0 Haiku — Nhanh, rẻ (Anthropic)' },
+        { value: 'claude-4.0-opus-20260101',    label: '🟠 Claude 4.0 Opus — Mạnh nhất gen 4 (Anthropic)' },
+        { value: 'claude-sonnet-4-20250514',    label: '🟠 Claude Sonnet 4 — Legacy (Anthropic)' },
+        // Deepseek
+        { value: 'deepseek-v4-flash',  label: '🔮 Deepseek V4 Flash — Mới nhất (Deepseek — khuyến nghị)' },
+        { value: 'deepseek-v4-pro',    label: '🔮 Deepseek V4 Pro — Thinking, mạnh nhất (Deepseek)' },
+        { value: 'deepseek-reasoner',  label: '🔮 Deepseek R1 — Lý luận ổn định (Deepseek)' },
+        // Grok
+        { value: 'grok-4-fast',      label: '⚡ Grok 4 Fast — Nhanh (xAI — khuyến nghị)' },
+        { value: 'grok-4',           label: '⚡ Grok 4 — Flagship (xAI)' },
+        { value: 'grok-4-mini',      label: '⚡ Grok 4 Mini — Lý luận, rẻ (xAI)' },
+        { value: 'grok-4-mini-fast', label: '⚡ Grok 4 Mini Fast — Siêu nhanh (xAI)' },
+        { value: 'grok-3',           label: '⚡ Grok 3 — Legacy ổn định (xAI)' },
+        // Mistral
+        { value: 'mistral-large-2-latest',  label: '🌀 Mistral Large 2 — Mạnh nhất (Mistral — khuyến nghị)' },
+        { value: 'codestral-2-latest',      label: '🌀 Codestral 2 — Code chuyên dụng (Mistral)' },
+        { value: 'mistral-small-3-latest',  label: '🌀 Mistral Small 3 — Nhanh, rẻ (Mistral)' },
+        { value: 'mistral-medium-latest',   label: '🌀 Mistral Medium — Cân bằng (Mistral)' },
+        { value: 'open-mistral-nemo-2',     label: '🌀 Mistral Nemo 2 — Nhẹ (Mistral)' },
+      ],
+      optionsFilter: { key: 'platform', map: {
+        openai:   ['gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5', 'o4-mini', 'o3', 'gpt-4.1'],
+        gemini:   ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro'],
+        claude:   ['claude-4.6-sonnet-20260301', 'claude-4.5-sonnet-20260115', 'claude-4.0-haiku-20260101', 'claude-4.0-opus-20260101', 'claude-sonnet-4-20250514'],
+        deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner'],
+        grok:     ['grok-4-fast', 'grok-4', 'grok-4-mini', 'grok-4-mini-fast', 'grok-3'],
+        mistral:  ['mistral-large-2-latest', 'codestral-2-latest', 'mistral-small-3-latest', 'mistral-medium-latest', 'open-mistral-nemo-2'],
+      }},
+      hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
     {
       key: 'apiKey', label: 'API Key', type: 'text',
@@ -890,67 +950,19 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
     },
     {
       key: 'maxHistoryMessages', label: 'Số tin nhắn lịch sử tối đa', type: 'number',
-      desc: 'Giới hạn bao nhiêu tin nhắn lịch sử được gửi kèm (để tiết kiệm token). Mặc định 10.',
-      advanced: true,
-    },
-    {
-      key: 'model', label: 'Model AI', type: 'select',
-      desc: 'Chọn model AI. Danh sách bao gồm tất cả các nền tảng — chọn model phù hợp với nền tảng đã chọn ở trên.',
-      options: [
-        // OpenAI
-        { value: 'gpt-5.4',          label: '🤖 GPT-5.4 — Flagship mới nhất (OpenAI)' },
-        { value: 'gpt-5.4-pro',      label: '🤖 GPT-5.4 Pro — Thông minh nhất (OpenAI)' },
-        { value: 'gpt-5.4-mini',     label: '🤖 GPT-5.4 Mini — Code, subagent (OpenAI — khuyến nghị)' },
-        { value: 'gpt-5.4-nano',     label: '🤖 GPT-5.4 Nano — Siêu rẻ (OpenAI)' },
-        { value: 'gpt-5-mini',       label: '🤖 GPT-5 Mini — Cân bằng, giá tốt (OpenAI)' },
-        { value: 'gpt-5-nano',       label: '🤖 GPT-5 Nano — Nhanh, rẻ nhất (OpenAI)' },
-        { value: 'gpt-5',            label: '🤖 GPT-5 — Lý luận mạnh (OpenAI)' },
-        { value: 'o4-mini',          label: '🤖 o4-mini — Lý luận nhanh (OpenAI)' },
-        { value: 'o3',               label: '🤖 o3 — Lý luận mạnh (OpenAI)' },
-        { value: 'gpt-4.1',          label: '🤖 GPT-4.1 — Legacy non-reasoning (OpenAI)' },
-        // Gemini
-        { value: 'gemini-3.1-pro',   label: '💎 Gemini 3.1 Pro — Mạnh nhất (Google — khuyến nghị)' },
-        { value: 'gemini-3.1-flash', label: '💎 Gemini 3.1 Flash — Nhanh (Google)' },
-        { value: 'gemini-3.0-flash', label: '💎 Gemini 3.0 Flash — Rẻ (Google)' },
-        { value: 'gemini-3.0-flash-lite', label: '💎 Gemini 3.0 Flash Lite — Siêu rẻ (Google)' },
-        { value: 'gemini-2.5-pro',   label: '💎 Gemini 2.5 Pro — Legacy ổn định (Google)' },
-        // Claude (Anthropic)
-        { value: 'claude-4.6-sonnet-20260301',  label: '🟠 Claude 4.6 Sonnet — Mới nhất (Anthropic — khuyến nghị)' },
-        { value: 'claude-4.5-sonnet-20260115',  label: '🟠 Claude 4.5 Sonnet — Cân bằng (Anthropic)' },
-        { value: 'claude-4.0-haiku-20260101',   label: '🟠 Claude 4.0 Haiku — Nhanh, rẻ (Anthropic)' },
-        { value: 'claude-4.0-opus-20260101',    label: '🟠 Claude 4.0 Opus — Mạnh nhất gen 4 (Anthropic)' },
-        { value: 'claude-sonnet-4-20250514',    label: '🟠 Claude Sonnet 4 — Legacy (Anthropic)' },
-        // Deepseek
-        { value: 'deepseek-chat-v3.2',    label: '🔮 Deepseek V3.2 — Mới nhất (Deepseek — khuyến nghị)' },
-        { value: 'deepseek-chat-v3.1',    label: '🔮 Deepseek V3.1 — Cân bằng (Deepseek)' },
-        { value: 'deepseek-reasoner-r1.5',label: '🔮 Deepseek R1.5 — Lý luận mới nhất (Deepseek)' },
-        { value: 'deepseek-reasoner',     label: '🔮 Deepseek R1 — Lý luận ổn định (Deepseek)' },
-        // Grok
-        { value: 'grok-4-fast',      label: '⚡ Grok 4 Fast — Nhanh (xAI — khuyến nghị)' },
-        { value: 'grok-4',           label: '⚡ Grok 4 — Flagship (xAI)' },
-        { value: 'grok-4-mini',      label: '⚡ Grok 4 Mini — Lý luận, rẻ (xAI)' },
-        { value: 'grok-4-mini-fast', label: '⚡ Grok 4 Mini Fast — Siêu nhanh (xAI)' },
-        { value: 'grok-3',           label: '⚡ Grok 3 — Legacy ổn định (xAI)' },
-        // Mistral
-        { value: 'mistral-large-2-latest',  label: '🌀 Mistral Large 2 — Mạnh nhất (Mistral — khuyến nghị)' },
-        { value: 'codestral-2-latest',      label: '🌀 Codestral 2 — Code chuyên dụng (Mistral)' },
-        { value: 'mistral-small-3-latest',  label: '🌀 Mistral Small 3 — Nhanh, rẻ (Mistral)' },
-        { value: 'mistral-medium-latest',   label: '🌀 Mistral Medium — Cân bằng (Mistral)' },
-        { value: 'open-mistral-nemo-2',     label: '🌀 Mistral Nemo 2 — Nhẹ (Mistral)' },
-      ],
-      advanced: true,
-      hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
+      placeholder: '20', min: 1,
+      desc: 'Giới hạn bao nhiêu tin nhắn lịch sử được gửi kèm (để tiết kiệm token). Mặc định 20.',
     },
     {
       key: 'maxTokens', label: 'Độ dài tối đa (tokens)', type: 'number',
-      desc: 'Giới hạn độ dài câu trả lời. 1 token ≈ 0.75 từ. 300 = ~200 từ là đủ cho chat.',
-      advanced: true,
+      placeholder: '500',
+      desc: 'Giới hạn độ dài câu trả lời. 1 token ≈ 0.75 từ. 500 = ~375 từ.',
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
     {
       key: 'temperature', label: 'Mức độ sáng tạo (0.0 – 1.0)', type: 'number',
+      placeholder: '0.7',
       desc: '0 = trả lời chính xác, ổn định. 1 = sáng tạo, đa dạng hơn. Khuyến nghị 0.7 cho chat bán hàng.',
-      advanced: true,
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
   ],
@@ -981,6 +993,7 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
         { value: 'mistral',  label: '🌀 Mistral AI' },
       ],
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
+      clearsKeyOnChange: ['model'],
     },
     {
       key: 'input', label: 'Văn bản cần phân loại', type: 'text',
@@ -1003,19 +1016,29 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
       key: 'model', label: 'Model AI', type: 'select',
       desc: 'Chọn model phù hợp với nền tảng đã chọn ở trên.',
       options: [
-        { value: 'gpt-5.4-mini',     label: '🤖 GPT-5.4 Mini — Code, subagent (OpenAI)' },
+        { value: 'gpt-5.4-mini',     label: '🤖 GPT-5.4 Mini — Code, subagent (OpenAI — khuyến nghị)' },
         { value: 'gpt-5-mini',       label: '🤖 GPT-5 Mini — Cân bằng, giá tốt (OpenAI)' },
-        { value: 'gemini-3.1-flash', label: '💎 Gemini 3.1 Flash (Google)' },
-        { value: 'gemini-3.0-flash', label: '💎 Gemini 3.0 Flash (Google)' },
-        { value: 'claude-4.6-sonnet-20260301',  label: '🟠 Claude 4.6 Sonnet (Anthropic)' },
+        { value: 'gpt-5.4',          label: '🤖 GPT-5.4 — Flagship (OpenAI)' },
+        { value: 'gemini-3.5-flash',        label: '💎 Gemini 3.5 Flash (Google — khuyến nghị)' },
+        { value: 'gemini-3.1-pro-preview',  label: '💎 Gemini 3.1 Pro Preview (Google)' },
+        { value: 'gemini-3-flash-preview',  label: '💎 Gemini 3 Flash Preview (Google)' },
+        { value: 'claude-4.6-sonnet-20260301',  label: '🟠 Claude 4.6 Sonnet (Anthropic — khuyến nghị)' },
         { value: 'claude-4.0-haiku-20260101',   label: '🟠 Claude 4.0 Haiku — Nhanh (Anthropic)' },
-        { value: 'deepseek-chat-v3.2',    label: '🔮 Deepseek V3.2 (Deepseek)' },
-        { value: 'grok-4-mini-fast', label: '⚡ Grok 4 Mini Fast (xAI)' },
-        { value: 'grok-4-mini',      label: '⚡ Grok 4 Mini (xAI)' },
-        { value: 'mistral-small-3-latest', label: '🌀 Mistral Small 3 (Mistral)' },
-        { value: 'mistral-large-2-latest', label: '🌀 Mistral Large 2 (Mistral)' },
+        { value: 'deepseek-v4-flash',  label: '🔮 Deepseek V4 Flash (Deepseek — khuyến nghị)' },
+        { value: 'deepseek-v4-pro',    label: '🔮 Deepseek V4 Pro — Thinking (Deepseek)' },
+        { value: 'grok-4-fast',      label: '⚡ Grok 4 Fast (xAI — khuyến nghị)' },
+        { value: 'grok-4-mini-fast', label: '⚡ Grok 4 Mini Fast — Siêu nhanh (xAI)' },
+        { value: 'mistral-large-2-latest', label: '🌀 Mistral Large 2 (Mistral — khuyến nghị)' },
+        { value: 'mistral-small-3-latest', label: '🌀 Mistral Small 3 — Nhanh, rẻ (Mistral)' },
       ],
-      advanced: true,
+      optionsFilter: { key: 'platform', map: {
+        openai:   ['gpt-5.4-mini', 'gpt-5-mini', 'gpt-5.4'],
+        gemini:   ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview'],
+        claude:   ['claude-4.6-sonnet-20260301', 'claude-4.0-haiku-20260101'],
+        deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        grok:     ['grok-4-fast', 'grok-4-mini-fast'],
+        mistral:  ['mistral-large-2-latest', 'mistral-small-3-latest'],
+      }},
       hideWhenKey: 'aiConfigMode', hideWhenValue: 'assistant',
     },
   ],
@@ -1308,44 +1331,6 @@ const CONFIG_SCHEMA: Record<string, Field[]> = {
       key: 'order', label: 'Dữ liệu đơn hàng (JSON)', type: 'json',
       hint: '{"line_items":[{"variant_id":"123","quantity":1,"price":"150000"}],"customer":{"phone":"0901234567"},"shipping_address":{"name":"Nguyễn Văn A","address1":"123 Đường ABC","city":"Hồ Chí Minh","phone":"0901234567"}}',
       desc: 'Đối tượng đơn hàng Sapo. Cấu trúc tương tự Haravan/Shopify. line_items bắt buộc.',
-    },
-  ],
-
-  // ─── iPOS ─────────────────────────────────────────────────────────────────
-  'ipos.lookupCustomer': [
-    {
-      key: 'phone', label: 'Số điện thoại khách hàng', type: 'text',
-      placeholder: '{{ $trigger.fromPhone }}',
-      templateVars: ['$trigger.fromPhone', '$trigger.content'],
-    },
-  ],
-  'ipos.lookupOrder': [
-    {
-      key: 'phone', label: 'SĐT khách hàng', type: 'text',
-      placeholder: '{{ $trigger.fromPhone }}',
-      templateVars: ['$trigger.fromPhone'],
-    },
-    {
-      key: 'orderId', label: 'Mã đơn / hóa đơn', type: 'text',
-      placeholder: '{{ $trigger.content }}',
-      templateVars: ['$trigger.content'],
-      advanced: true,
-    },
-  ],
-  'ipos.lookupProduct': [
-    {
-      key: 'keyword', label: 'Tên sản phẩm / món ăn', type: 'text',
-      placeholder: '{{ $trigger.content }}',
-      desc: 'Tìm sản phẩm hoặc món ăn trong iPOS.',
-      templateVars: ['$trigger.content'],
-    },
-    { key: 'limit', label: 'Số kết quả tối đa', type: 'number', placeholder: '10', advanced: true },
-  ],
-  'ipos.createOrder': [
-    {
-      key: 'order', label: 'Dữ liệu đơn hàng (JSON)', type: 'json',
-      hint: '{"invoice":{"details":[{"productId":"123","quantity":2,"price":50000}],"customerName":"Nguyễn Văn A","customerPhone":"0901234567","paymentMethod":"CASH","note":"Ít đường"}}',
-      desc: 'Payload hiện tại đang theo builder nội bộ `toIPOS()` — wrapper `invoice` chứa `details[]`, thông tin khách và paymentMethod. Cần verify lại với account iPOS thật nếu mở rộng tiếp.',
     },
   ],
 
@@ -3314,17 +3299,33 @@ export default function NodeConfigPanel({ node, onConfigChange, onLabelChange, o
               className={`${inputCls} resize-none`} />
           )
         )}
-        {field.type === 'select' && (
-          <select value={config[field.key] ?? field.options?.[0]?.value ?? ''}
-            onChange={e => update(field.key, e.target.value)} className={selectCls}>
-            {field.options?.map(opt => (
-              <option key={opt.value} value={opt.value} className="bg-gray-800 text-white">{opt.label}</option>
-            ))}
-          </select>
-        )}
+        {field.type === 'select' && (() => {
+          let opts = field.options ?? [];
+          if (field.optionsFilter) {
+            const filterVal = config[field.optionsFilter.key] as string | undefined;
+            const allowed = filterVal ? field.optionsFilter.map[filterVal] : null;
+            if (allowed) opts = opts.filter(o => allowed.includes(o.value));
+          }
+          return (
+            <select value={config[field.key] ?? opts[0]?.value ?? ''}
+              onChange={e => {
+                const next: Record<string, any> = { ...config, [field.key]: e.target.value };
+                if (field.clearsKeyOnChange) field.clearsKeyOnChange.forEach(k => { delete next[k]; });
+                setConfig(next); onConfigChange(next);
+              }} className={selectCls}>
+              {opts.map(opt => (
+                <option key={opt.value} value={opt.value} className="bg-gray-800 text-white">{opt.label}</option>
+              ))}
+            </select>
+          );
+        })()}
         {field.type === 'number' && (
-          <input type="number" value={config[field.key] ?? 0}
-            onChange={e => update(field.key, Number(e.target.value))} className={inputCls} />
+          <input type="number" value={config[field.key] ?? ''}
+            min={field.min} placeholder={field.placeholder}
+            onChange={e => {
+              const v = Number(e.target.value);
+              update(field.key, field.min !== undefined && v < field.min ? field.min : v);
+            }} className={inputCls} />
         )}
         {field.type === 'boolean' && (
           <ToggleSwitch checked={!!config[field.key]} onChange={v => update(field.key, v)}

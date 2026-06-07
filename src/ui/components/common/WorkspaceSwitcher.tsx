@@ -165,8 +165,8 @@ export default function WorkspaceSwitcher() {
                                 <button
                                     onClick={() => {
                                         setOpen(false);
-                                        window.dispatchEvent(new CustomEvent('nav:settings', { detail: { tab: 'workspace' } }));
                                         window.dispatchEvent(new CustomEvent('nav:view', { detail: { view: 'settings' } }));
+                                        setTimeout(() => window.dispatchEvent(new CustomEvent('nav:settings', { detail: { tab: 'workspace' } })), 80);
                                     }}
                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 rounded-lg transition-colors"
                                 >

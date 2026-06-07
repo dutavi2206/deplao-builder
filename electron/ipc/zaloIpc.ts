@@ -7,6 +7,7 @@ import DatabaseService from '../../src/services/database/DatabaseService';
 import WorkspaceManager from '../../src/utils/WorkspaceManager';
 import Logger from '../../src/utils/Logger';
 import EventBroadcaster from '../../src/services/event/EventBroadcaster';
+import FileStorageService from '../../src/services/file/FileStorageService';
 
 /**
  * Registry of IPC handler functions.
@@ -127,15 +128,15 @@ export function registerZaloIpc() {
     );
 
     wrap('zalo:sendImage', (s, p) =>
-        s.sendImage(p.filePath, p.threadId, p.type, p.message, p.quote)
+        s.sendImage(FileStorageService.resolveAbsolutePath(p.filePath), p.threadId, p.type, p.message, p.quote)
     );
 
     wrap('zalo:sendImages', (s, p) =>
-        s.sendImages(p.filePaths, p.threadId, p.type, p.quote)
+        s.sendImages((p.filePaths || []).map((fp: string) => FileStorageService.resolveAbsolutePath(fp)), p.threadId, p.type, p.quote)
     );
 
     wrap('zalo:sendFile', (s, p) =>
-        s.sendFile(p.filePath, p.threadId, p.type, p.quote)
+        s.sendFile(FileStorageService.resolveAbsolutePath(p.filePath), p.threadId, p.type, p.quote)
     );
 
     wrap('zalo:sendVoice', (s, p) =>
@@ -187,7 +188,7 @@ export function registerZaloIpc() {
     // Adding a manual broadcast here would cause double events at boss and duplicate relay to employees.
 
     wrap('zalo:forwardMessage', (s, p) =>
-        s.forwardMessage(p.message, p.threadIds, p.type)
+        s.forwardMessage(p.payload, p.threadIds, p.type)
     );
 
     // ─── Lịch sử tin nhắn ────────────────────────────────────────────────

@@ -54,7 +54,7 @@ class ZaloLoginHelper {
             const capturedAgent = proxyAgent;
             cfg.polyfill = async (url: string, options: any) => {
                 // Always inject the proxy agent — do NOT rely on zca-js forwarding cfg.agent
-                const res = await nodeFetch(url, { ...options, agent: capturedAgent });
+                const res = await nodeFetch(url, { ...options, agent: capturedAgent, timeout: 15000 });
                 // Patch each response to expose getSetCookie() — zca-js uses this to correctly parse
                 // cookies with commas in values (e.g. Expires dates in checkSession redirect).
                 // node-fetch v2 Headers lacks getSetCookie(); fallback split(", ") breaks those cookies.

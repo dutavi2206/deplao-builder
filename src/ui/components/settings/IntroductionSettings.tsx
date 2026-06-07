@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import ipc from '@/lib/ipc';
 
 type FeatureId =
   | 'overview'
@@ -12,7 +13,8 @@ type FeatureId =
   | 'erp'
   | 'employees'
   | 'security'
-  | 'policy';
+  | 'policy'
+  | 'bugreport';
 
 interface Feature {
   id: FeatureId;
@@ -33,6 +35,7 @@ const FEATURES: Feature[] = [
   { id: 'employees',    icon: '🧑‍💼', label: 'Cài đặt nhân viên & workspace' },
   { id: 'security',     icon: '🔒', label: 'Bảo mật & Dữ liệu' },
   { id: 'policy',       icon: '📜', label: 'Chính sách pháp lý' },
+  { id: 'bugreport',    icon: '🐛', label: 'Hướng dẫn báo lỗi' },
 ];
 
 function Badge({ text, color }: { text: string; color: string }) {
@@ -729,7 +732,6 @@ function IntegrationPanel() {
             { icon: '🛒', name: 'KiotViet', desc: 'Tra cứu đơn, khách hàng, tạo đơn hàng' },
             { icon: '🏪', name: 'Haravan', desc: 'Nền tảng TMĐT — quản lý đơn, kho hàng' },
             { icon: '🟢', name: 'Sapo', desc: 'Bán hàng đa kênh — đơn, khách hàng, sản phẩm' },
-            { icon: '🍽️', name: 'iPOS', desc: 'POS nhà hàng / F&B — đơn, doanh thu' },
             { icon: '⚡', name: 'Nhanh.vn', desc: 'Quản lý đơn, kho, khách hàng đa kênh' },
             { icon: '🥞', name: 'Pancake POS', desc: 'Quản lý đơn hàng, chat đa kênh' },
           ].map((p, i) => (
@@ -1287,6 +1289,129 @@ function PolicyPanel() {
   );
 }
 
+function BugReportPanel() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <span className="text-3xl leading-none">🐛</span>
+        <div>
+          <h3 className="text-white font-bold text-base">Báo lỗi & Hướng dẫn</h3>
+          <p className="text-gray-400 text-xs mt-0.5 leading-relaxed">
+            Tìm thấy lỗi? Báo cáo chi tiết giúp nhóm phát triển xác định và sửa lỗi nhanh hơn.
+            <strong className="text-amber-400"> Báo cáo có chứng minh rõ ràng sẽ được ưu tiên xử lý trước.</strong>
+          </p>
+        </div>
+      </div>
+
+      <Card>
+        <SectionTitle>📝 Quy trình báo lỗi — 5 bước</SectionTitle>
+        <StepList steps={[
+          {
+            title: '1. Tái hiện lỗi',
+            desc: 'Lặp lại thao tác khi gặp lỗi. Ghi nhận từng bước cụ thể (VD: "Mở CRM → Nhấn Chiến dịch → Nhấn Tạo mới → Lỗi"). Xác nhận lỗi xảy ra mỗi lần hay chỉ thỉnh thoảng. Thử trên phiên bản Deplao mới nhất.',
+          },
+          {
+            title: '2. Chụp ảnh / quay video minh hoạ',
+            desc: 'Screenshot khi lỗi xuất hiện (PrtScn / Snipping Tool). Quay video ngắn 10-30s nếu lỗi liên quan nhiều bước (Win+G). Chụp Developer Tools (Ctrl+Shift+I → tab Console) để ghi lại lỗi đỏ. Dùng mũi tên/viền đỏ chỉ rõ vị trí lỗi.',
+          },
+          {
+            title: '3. Thu thập thông tin kỹ thuật',
+            desc: 'Phiên bản Deplao (thanh trên cùng bên trái). Hệ điều hành (Windows 10/11, macOS Intel/Apple Silicon). Tài khoản nào gặp lỗi (Zalo cá nhân, Business, Facebook). Tính năng liên quan. Nếu có lỗi Console (Ctrl+Shift+I → Console) — copy-paste nội dung.',
+          },
+          {
+            title: '4. Viết mô tả Issue trên GitHub',
+            desc: 'Tiêu đề mô tả ngắn gọn lỗi. Phần "Mô tả lỗi": 1-2 câu. "Bước tái hiện": danh sách numbered. "Kết quả mong đợi" vs "Kết quả thực tế". Đính kèm ảnh/video. "Thông tin môi trường": phiên bản, OS, tài khoản.',
+          },
+          {
+            title: '5. Gửi Issue và theo dõi',
+            desc: 'Nhấn Submit trên GitHub. Theo dõi email thông báo khi có phản hồi. Phản hồi sớm khi nhóm yêu cầu thêm thông tin. Khi lỗi đã sửa, cập nhật Deplao và xác nhận lại.',
+          },
+        ]} />
+      </Card>
+
+      <Card>
+        <SectionTitle>📖 Ví dụ: Báo cáo lỗi chất lượng cao</SectionTitle>
+        <div className="bg-gray-900/60 rounded-lg border border-gray-700/50 p-3 space-y-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="bg-red-900/40 text-red-300 text-[10px] px-2 py-0.5 rounded-full font-medium">bug</span>
+            <span className="text-white font-semibold">Chiến dịch CRM: Không gửi được tin khi chọn hơn 100 liên hệ</span>
+          </div>
+          <p className="text-gray-400 leading-relaxed">
+            <strong className="text-gray-200">Mô tả:</strong> Khi tạo chiến dịch gửi tin hàng loạt với hơn 100 người nhận,
+            nút "Bắt đầu gửi" không phản hồi. Console hiện lỗi timeout.
+          </p>
+          <div className="text-gray-400 leading-relaxed space-y-1">
+            <p><strong className="text-gray-200">Bước tái hiện:</strong></p>
+            <ol className="list-decimal pl-5 space-y-0.5">
+              <li>Mở CRM → Chiến dịch → Tạo chiến dịch mới</li>
+              <li>Chọn đối tượng: tất cả liên hệ có nhãn "Khách hàng" (~150 người)</li>
+              <li>Nhập nội dung tin nhắn → Nhấn "Bắt đầu gửi"</li>
+              <li>→ Không có phản hồi, nút chuyển disabled nhưng không gửi</li>
+            </ol>
+          </div>
+          <p className="text-gray-400 leading-relaxed">
+            <strong className="text-gray-200">Môi trường:</strong> Deplao v26.4.5, Windows 11, Zalo cá nhân.
+            Đã test 50 người (bình thường), 100 người (bình thường), 150 người (lỗi).
+          </p>
+          <div className="bg-green-900/20 border border-green-700/30 rounded-lg p-2 mt-2">
+            <p className="text-[11px] text-green-300">
+              ✅ Báo cáo này có: bước tái hiện chính xác, so sánh kết quả, thông tin môi trường đủ để xác định lỗi.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>🔍 Các loại lỗi thường gặp</SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {[
+            { icon: '🔴', type: 'Lỗi crash / treo app', tips: 'Mô tả thao tác cuối trước khi crash. Chụp screenshot lỗi. Kiểm tra Console (Ctrl+Shift+I).' },
+            { icon: '🟡', type: 'Lỗi giao diện / hiển thị', tips: 'Screenshot so sánh hiện tại vs mong đợi. Ghi OS, độ phân giải màn hình.' },
+            { icon: '🔵', type: 'Lỗi kết nối / đồng bộ', tips: 'Ghi thời điểm lỗi. Kiểm tra mạng. Thử đăng nhập lại. Gửi screenshot trạng thái.' },
+            { icon: '🟣', type: 'Lỗi tích hợp bên thứ 3', tips: 'Ghi rõ tích hợp nào. Kiểm tra API key. Mô tả expected vs actual response.' },
+            { icon: '🟠', type: 'Lỗi Workflow không chạy', tips: 'Screenshot flow designer. Ghi trigger + action. Kiểm tra log "Chạy gần đây".' },
+            { icon: '⚪', type: 'Hiệu năng chậm / lag', tips: 'Ghi quy mô dữ liệu. Mô tả thao tác bị chậm. So sánh với phiên bản trước.' },
+          ].map((item, i) => (
+            <div key={i} className="bg-gray-700/30 rounded-lg p-2.5 border border-gray-600/30">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="text-sm">{item.icon}</span>
+                <p className="text-[11px] font-semibold text-white">{item.type}</p>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed">{item.tips}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>🚫 Những điều KHÔNG nên làm</SectionTitle>
+        <BulletList items={[
+          'Gửi issue chỉ ghi "app bị lỗi" mà không có mô tả chi tiết',
+          'Gửi nhiều issue trùng lặp — hãy kiểm tra issue đã tồn tại trước',
+          'Đính kèm ảnh chụp thông tin nhạy cảm (mã OTP, mật khẩu, SĐT KH...)',
+          'Dùng issue để hỏi cách sử dụng — đọc trang Hướng dẫn trước',
+          'Gửi yêu cầu tính năng qua mục báo lỗi — tạo issue riêng nhãn "enhancement"',
+        ]} />
+      </Card>
+
+      <div className="flex justify-center gap-3 pt-2">
+        <button
+          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues/new')}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Tạo Issue mới trên GitHub →
+        </button>
+        <button
+          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues')}
+          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg transition-colors"
+        >
+          Xem danh sách Issues
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const PANEL_MAP = {
   overview:     OverviewPanel,
   dashboard:    DashboardPanel,
@@ -1300,12 +1425,37 @@ const PANEL_MAP = {
   employees:    EmployeesPanel,
   security:     SecurityPanel,
   policy:       PolicyPanel,
+  bugreport:    BugReportPanel,
 } satisfies Record<FeatureId, React.FC>;
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function IntroductionSettings() {
-  const [activeFeature, setActiveFeature] = useState<FeatureId>('overview');
+
+interface IntroductionSettingsProps {
+  initialSubtab?: FeatureId;
+}
+
+export default function IntroductionSettings({ initialSubtab }: IntroductionSettingsProps = {}) {
+  const [activeFeature, setActiveFeature] = useState<FeatureId>(initialSubtab || 'overview');
   const Panel = PANEL_MAP[activeFeature];
+
+  // Listen for external subtab navigation events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { subtab } = (e as CustomEvent).detail || {};
+      if (subtab && subtab in PANEL_MAP) {
+        setActiveFeature(subtab as FeatureId);
+      }
+    };
+    window.addEventListener('nav:intro-subtab', handler);
+    return () => window.removeEventListener('nav:intro-subtab', handler);
+  }, []);
+
+  // Reset to initialSubtab when prop changes (e.g. parent re-renders with new event)
+  useEffect(() => {
+    if (initialSubtab && initialSubtab in PANEL_MAP) {
+      setActiveFeature(initialSubtab);
+    }
+  }, [initialSubtab]);
 
   return (
     <div className="space-y-3">

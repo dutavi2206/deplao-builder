@@ -28,6 +28,23 @@ function isContactCacheFresh(key: string): boolean {
   return !!t && (Date.now() - t) < CACHE_TTL_MS;
 }
 
+// ─── Alias refresh cache (24 giờ) ───────────────────────────────────────────
+const ALIAS_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+const ALIAS_REFRESH_KEY = 'aliasLastRefreshTimes';
+
+function getAliasRefreshTimes(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(ALIAS_REFRESH_KEY) || '{}'); } catch { return {}; }
+}
+function setAliasRefreshTime(key: string) {
+  const times = getAliasRefreshTimes();
+  times[key] = Date.now();
+  try { localStorage.setItem(ALIAS_REFRESH_KEY, JSON.stringify(times)); } catch {}
+}
+function isAliasRefreshFresh(key: string): boolean {
+  const t = getAliasRefreshTimes()[key];
+  return !!t && (Date.now() - t) < ALIAS_REFRESH_TTL_MS;
+}
+
 // Module-level alias map
 const aliasMap = new Map<string, string>();
 const aliasLoadInFlight = new Map<string, Promise<void>>();
@@ -382,6 +399,39 @@ async function fetchContactInfo(zaloId: string, contactId: string): Promise<void
   }
 }
 
+/** Background refresh alias only (not full profile). Cache 24 giờ, silent on failure. */
+export async function refreshContactAlias(zaloId: string, contactId: string): Promise<void> {
+  const aliasCacheKey = `${zaloId}__${contactId}`;
+  if (isAliasRefreshFresh(aliasCacheKey)) return;
+
+  try {
+    const account = useAccountStore.getState().accounts.find((a) => a.zalo_id === zaloId);
+    if (!account) return;
+    const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
+    const res = await ipc.zalo?.getUserInfo({ auth, userId: contactId });
+    const rawProfile = res?.response?.changed_profiles?.[contactId]
+      || res?.response?.data?.[contactId];
+    if (!rawProfile) return;
+
+    const { alias: apiAlias } = extractUserProfile(rawProfile);
+    if (!apiAlias) return;
+
+    const cachedAlias = aliasMap.get(`${zaloId}__${contactId}`);
+    const resolvedAlias = apiAlias || cachedAlias || '';
+    if (!resolvedAlias) return;
+
+    useChatStore.getState().updateContact(zaloId, {
+      contact_id: contactId,
+      alias: resolvedAlias,
+    });
+    aliasMap.set(`${zaloId}__${contactId}`, resolvedAlias);
+    ipc.db?.setContactAlias({ zaloId, contactId, alias: resolvedAlias }).catch(() => {});
+    setAliasRefreshTime(aliasCacheKey);
+  } catch {
+    // On failure, do NOT set the timestamp so it retries next time
+  }
+}
+
 // Throttle set: tránh fetch group liên tục trong vòng 60s
 const fetchingGroups = new Set<string>();
 
@@ -578,26 +628,41 @@ export function useZaloEvents() {
         return;
       }
 
-      // 1. Switch sang đúng account nếu cần (multi-account)
+      const chatStore = useChatStore.getState();
       const { activeAccountId, setActiveAccount } = useAccountStore.getState();
+
+      // 1. Lưu thread notification vào perAccountThread TRƯỚC khi switch account
+      //    → ConversationList effect([activeAccountId]) sẽ restore đúng thread này
+      //    thay vì restore thread cũ của account
+      chatStore.saveAccountThread(zaloId, threadId, threadType || 0);
+
+      // 2. Switch sang đúng account nếu cần (multi-account)
       if (activeAccountId !== zaloId) {
         setActiveAccount(zaloId);
       }
 
-      // 2. Chuyển sang tab Chat
+      // 3. Chuyển sang tab Chat
       useAppStore.getState().setView('chat');
 
-      // 3. Trên mobile: hiện màn hình chat
+      // 4. Trên mobile: hiện màn hình chat
       useAppStore.getState().setMobileShowChat(true);
 
-      // 4. Navigate đến đúng thread
-      setActiveThread(threadId, threadType);
+      // 5. Navigate đến đúng thread — dùng setTimeout ngắn để đảm bảo
+      //    ConversationList effect đã chạy xong (nếu có switch account)
+      const applyThread = () => {
+        setActiveThread(threadId, threadType);
+        ipc.db?.getMessages({ zaloId, threadId, limit: 50, offset: 0 }).then((res: any) => {
+          const msgs = res?.messages || [];
+          if (msgs.length > 0) setMessages(zaloId, threadId, [...msgs].reverse());
+        }).catch(() => {});
+      };
 
-      // 5. Load messages
-      ipc.db?.getMessages({ zaloId, threadId, limit: 50, offset: 0 }).then((res: any) => {
-        const msgs = res?.messages || [];
-        if (msgs.length > 0) setMessages(zaloId, threadId, [...msgs].reverse());
-      }).catch(() => {});
+      if (activeAccountId !== zaloId) {
+        // Delay khi switch account → chờ ConversationList effect chạy xong
+        setTimeout(applyThread, 50);
+      } else {
+        applyThread();
+      }
 
       // 6. Clear unread, mark as read, update badge
       ipc.db?.markAsRead({ zaloId, contactId: threadId }).catch(() => {});
@@ -1011,6 +1076,10 @@ export function useZaloEvents() {
         const hasRealName = existing && existing.display_name && existing.display_name !== threadId;
         if (!hasRealName || !isContactCacheFresh(cacheKey)) {
           fetchContactInfo(zaloId, threadId);
+        }
+        // Daily alias background refresh (riêng biệt với full contact fetch)
+        if (!isAliasRefreshFresh(`${zaloId}__${threadId}`)) {
+          refreshContactAlias(zaloId, threadId);
         }
       } else {
         // ─── Nhóm: fetch info + members ────────────────────────────────────

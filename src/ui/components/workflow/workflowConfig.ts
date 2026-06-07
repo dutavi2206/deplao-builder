@@ -121,10 +121,6 @@ export const NODE_GROUPS: NodeGroup[] = [
       { type: 'sapo.lookupOrder',        label: 'Sapo: Tra cứu đơn hàng',       desc: 'Tìm đơn hàng Sapo theo mã đơn hoặc SĐT' },
       { type: 'sapo.lookupProduct',      label: 'Sapo: Tra cứu sản phẩm',       desc: 'Tìm sản phẩm Sapo theo tên' },
       { type: 'sapo.createOrder',        label: 'Sapo: Tạo đơn hàng',           desc: 'Tạo đơn hàng mới trong Sapo' },
-      { type: 'ipos.lookupCustomer',     label: 'iPOS: Tra cứu khách hàng',     desc: 'Tìm thông tin khách hàng iPOS theo số điện thoại' },
-      { type: 'ipos.lookupOrder',        label: 'iPOS: Tra cứu đơn/hóa đơn',   desc: 'Tìm đơn hàng / hóa đơn iPOS theo mã hoặc SĐT' },
-      { type: 'ipos.lookupProduct',      label: 'iPOS: Tra cứu sản phẩm/món',   desc: 'Tìm sản phẩm hoặc món ăn trong iPOS' },
-      { type: 'ipos.createOrder',        label: 'iPOS: Tạo đơn hàng',           desc: 'Tạo đơn hàng mới trong iPOS' },
       { type: 'nhanh.lookupCustomer',    label: 'Nhanh.vn: Tra cứu khách hàng', desc: 'Tìm thông tin khách hàng Nhanh.vn theo số điện thoại' },
       { type: 'nhanh.lookupOrder',       label: 'Nhanh.vn: Tra cứu đơn hàng',  desc: 'Tìm đơn hàng Nhanh.vn theo mã đơn hoặc SĐT' },
       { type: 'nhanh.lookupProduct',     label: 'Nhanh.vn: Tra cứu sản phẩm',  desc: 'Tìm sản phẩm trong Nhanh.vn theo tên hoặc mã' },
@@ -239,10 +235,6 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, any>> = {
   'sapo.lookupOrder':        { phone: '{{ $trigger.fromPhone }}', orderId: '' },
   'sapo.lookupProduct':      { keyword: '{{ $trigger.content }}', limit: 10 },
   'sapo.createOrder':        { order: '{"line_items":[{"variant_id":"","quantity":1,"price":""}],"customer":{"phone":""}}' },
-  'ipos.lookupCustomer':     { phone: '{{ $trigger.fromPhone }}' },
-  'ipos.lookupOrder':        { phone: '{{ $trigger.fromPhone }}', orderId: '' },
-  'ipos.lookupProduct':      { keyword: '{{ $trigger.content }}', limit: 10 },
-  'ipos.createOrder':        { order: '{"invoice":{"details":[{"productId":"","quantity":1,"price":0}],"customerName":"","customerPhone":"","paymentMethod":"CASH"}}' },
   'nhanh.lookupCustomer':    { phone: '{{ $trigger.fromPhone }}' },
   'nhanh.lookupOrder':       { phone: '{{ $trigger.fromPhone }}', orderId: '' },
   'nhanh.lookupProduct':     { keyword: '{{ $trigger.content }}', code: '', limit: 10 },
@@ -296,7 +288,7 @@ export function nodeTypeGroup(type: string): string {
   if (type.startsWith('output.'))  return 'output';
   // POS / Shipping / Payment
   if (type.startsWith('kiotviet.') || type.startsWith('haravan.') ||
-      type.startsWith('sapo.')     || type.startsWith('ipos.')    ||
+      type.startsWith('sapo.')     ||
       type.startsWith('nhanh.')    || type.startsWith('pancake.')) return 'integration';
   if (type.startsWith('payment.') || type.startsWith('ghn.') || type.startsWith('ghtk.')) return 'integration';
   if (isUnsupportedWorkflowNodeType(type)) return 'integration';

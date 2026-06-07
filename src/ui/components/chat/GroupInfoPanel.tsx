@@ -33,39 +33,19 @@ async function fetchPendingMembers(
   }
 
   const res = await ipc.zalo?.getPendingGroupMembers({ auth, groupId });
-  const rawList: any[] =
-    res?.response?.memberIds ||
-    res?.response?.pendingMembers ||
-    res?.response?.members ||
-    (Array.isArray(res?.response) ? res.response : []);
+  // API returns: { time, users: [{ uid, dpn, avatar, user_submit }] }
+  const rawList: any[] = res?.response?.users || [];
 
-  const uids: string[] = rawList
-    .map((item: any) =>
-      typeof item === 'string' ? item : (item.id || item.userId || item.uid || String(item)),
-    )
-    .filter(Boolean);
-
-  if (uids.length === 0) {
+  if (rawList.length === 0) {
     pendingMembersCache.set(key, { data: [], ts: Date.now() });
     return [];
   }
 
-  const profiles: PendingMember[] = [];
-  await Promise.all(
-    uids.map(async (uid) => {
-      try {
-        const info = await ipc.zalo?.getUserInfo({ auth, userId: uid });
-        const p = info?.response?.user || info?.response || {};
-        profiles.push({
-          userId: uid,
-          displayName: p.display || p.displayName || p.zaloName || p.name || uid,
-          avatar: p.avatar || p.avt || '',
-        });
-      } catch {
-        profiles.push({ userId: uid, displayName: uid, avatar: '' });
-      }
-    }),
-  );
+  const profiles: PendingMember[] = rawList.map((item: any) => ({
+    userId: item.uid || item.id || item.userId || String(item),
+    displayName: item.dpn || item.displayName || item.display || item.name || item.uid || '',
+    avatar: item.avatar || item.avt || '',
+  })).filter(p => p.userId);
 
   pendingMembersCache.set(key, { data: profiles, ts: Date.now() });
   return profiles;
@@ -102,7 +82,7 @@ const MUTE_OPTIONS = [
 export default function GroupInfoPanel() {
   const { activeThreadId, contacts } = useChatStore();
   const { activeAccountId, getActiveAccount } = useAccountStore();
-  const { showNotification, setGroupInfo, setMuted, clearMuted, isMuted: isMutedFn } = useAppStore();
+  const { showNotification, setGroupInfo, setMuted, clearMuted, isMuted: isMutedFn, toggleConversationInfo } = useAppStore();
 
   const [panelView, setPanelView] = useState<PanelView>('info');
   const [mediaTab, setMediaTab] = useState<MediaTab>('image');
@@ -479,14 +459,23 @@ export default function GroupInfoPanel() {
   // ─── Main info view ───────────────────────────────────────────────────────
   return (
     <div className="w-72 h-full flex-shrink-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-y-auto">
-      {/* Header — with refresh button */}
-      <div className="flex items-center px-4 py-3 border-b border-gray-700">
+      {/* Header — with close + refresh buttons */}
+      <div className="flex items-center px-3 py-3 border-b border-gray-700">
+        <button
+          title="Đóng"
+          onClick={toggleConversationInfo}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-gray-700 text-gray-400 hover:text-white transition-colors flex-shrink-0"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
         <span className="flex-1 text-sm font-semibold text-white text-center">Thông tin nhóm</span>
         <button
           title="Cập nhật thông tin nhóm"
           onClick={fetchGroupInfo}
           disabled={loading}
-          className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-gray-700 text-gray-400 hover:text-white disabled:opacity-50 flex-shrink-0"
+          className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-gray-700 text-gray-400 hover:text-white disabled:opacity-50 flex-shrink-0"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
             className={loading ? 'animate-spin' : ''}>
@@ -754,10 +743,21 @@ function MembersPanel({ groupInfo, groupId, onBack, onRefresh, myAccountId, onSh
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [ctxMember, setCtxMember] = useState<GroupMember | null>(null);
   const [ctxPos, setCtxPos] = useState<{ top: number; left: number } | null>(null);
+  const [reloading, setReloading] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
 
   const myRole = getMyRole(groupInfo, myAccountId);
   const isAdmin = canManage(myRole);
+
+  const handleReload = async () => {
+    if (reloading) return;
+    setReloading(true);
+    try {
+      await onRefresh();
+    } finally {
+      setReloading(false);
+    }
+  };
 
   useEffect(() => {
     if (!ctxMember) return;
@@ -846,24 +846,39 @@ function MembersPanel({ groupInfo, groupId, onBack, onRefresh, myAccountId, onSh
 
   return (
     <div className="w-72 h-full flex-shrink-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-3 border-b border-gray-700">
-        <button onClick={onBack} className="p-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
+      <div className="flex items-center gap-1 px-3 py-3 border-b border-gray-700">
+        <button onClick={onBack} className="p-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors flex-shrink-0">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
-        <span className="text-sm font-semibold text-white flex-1 text-center pr-6">Thành viên</span>
+        <span className="text-sm font-semibold text-white flex-1 text-center">Thành viên</span>
+        {/* Add member */}
+        <button
+          title="Thêm thành viên"
+          onClick={() => setAddMemberOpen(true)}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-gray-700 text-gray-400 hover:text-white transition-colors flex-shrink-0"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+            <line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>
+          </svg>
+        </button>
+
+        {/* Reload member info */}
+        <button
+          title="Tải lại thông tin thành viên"
+          onClick={handleReload}
+          disabled={reloading}
+          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-50 flex-shrink-0"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={reloading ? 'animate-spin' : ''}>
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </button>
       </div>
 
-      {/* Add member — all users can add */}
-      <button onClick={() => setAddMemberOpen(true)}
-        className="mx-3 my-2 flex items-center justify-center gap-2 py-2 rounded-xl bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm transition-colors">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
-          <line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>
-        </svg>
-        Thêm thành viên
-      </button>
-
-      <div className="px-3 pb-2">
+      <div className="px-3 pb-2 pt-2">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Tìm thành viên..."
           className="w-full bg-gray-700 border border-gray-600 rounded-full px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500" />
@@ -1005,7 +1020,7 @@ function PendingPanel({ groupId, myAccountId, onBack, onCountChange }: {
       const res = await ipc.zalo?.reviewPendingMemberRequest({
         auth,
         groupId,
-        payload: { memberId: userId, isAccept: accept },
+        payload: { members: userId, isApprove: accept },
       });
       if (res?.success !== false) {
         showNotification(accept ? 'Đã phê duyệt thành viên' : 'Đã từ chối thành viên', 'success');
@@ -1042,7 +1057,7 @@ function PendingPanel({ groupId, myAccountId, onBack, onCountChange }: {
       try {
         const res = await ipc.zalo?.reviewPendingMemberRequest({
           auth, groupId,
-          payload: { memberId: member.userId, isAccept: true },
+          payload: { members: member.userId, isApprove: true },
         });
         if (res?.success !== false) {
           successCount++;
@@ -1268,7 +1283,7 @@ function PendingMembersSection({ groupId, isAdmin }: { groupId: string; isAdmin:
     try {
       const res = await ipc.zalo?.reviewPendingMemberRequest({
         auth, groupId,
-        payload: { memberId: userId, isAccept: accept },
+        payload: { members: userId, isApprove: accept },
       });
       if (res?.success !== false) {
         showNotification(accept ? 'Đã phê duyệt thành viên' : 'Đã từ chối thành viên', 'success');
@@ -1300,7 +1315,7 @@ function PendingMembersSection({ groupId, isAdmin }: { groupId: string; isAdmin:
       try {
         const res = await ipc.zalo?.reviewPendingMemberRequest({
           auth, groupId,
-          payload: { memberId: member.userId, isAccept: true },
+          payload: { members: member.userId, isApprove: true },
         });
         if (res?.success !== false) {
           successCount++;

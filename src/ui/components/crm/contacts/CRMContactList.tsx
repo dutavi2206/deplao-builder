@@ -454,6 +454,9 @@ export default function CRMContactList({
 
   function escapeCSV(val: any): string {
     const s = String(val ?? '');
+    // Excel tự chuyển số dài (SĐT, UID) thành scientific notation → ép giữ dạng text
+    if (/^\d+$/.test(s) && s.length >= 5)
+      return '="' + s + '"';
     if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r'))
       return '"' + s.replace(/"/g, '""') + '"';
     return s;
@@ -476,12 +479,12 @@ export default function CRMContactList({
           escapeCSV(c.alias || ''),
           escapeCSV(c.phone || ''),
           escapeCSV(c.contact_id),
-          typeLabel,
-          c.is_friend === 1 ? 'Có' : 'Không',
-          genderLabel,
+          escapeCSV(typeLabel),
+          escapeCSV(c.is_friend === 1 ? 'Có' : 'Không'),
+          escapeCSV(genderLabel),
           escapeCSV(c.birthday || ''),
-          c.last_message_time ? new Date(c.last_message_time).toLocaleString('vi-VN') : '',
-          c.note_count || 0,
+          escapeCSV(c.last_message_time ? new Date(c.last_message_time).toLocaleString('vi-VN') : ''),
+          escapeCSV(c.note_count || 0),
         ].join(',');
       });
       const csv = [headers.join(','), ...rows].join('\r\n');

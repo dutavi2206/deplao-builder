@@ -303,11 +303,6 @@ export default function IntegrationDetailPage({ catalogItem, saved, webhookPort,
               <li>• <code className="bg-blue-900/40 px-1 rounded">sapo.lookupOrder</code> — Tra cứu đơn hàng Sapo</li>
               <li>• <code className="bg-blue-900/40 px-1 rounded">sapo.createOrder</code> — Tạo đơn hàng mới trong Sapo</li>
             </>}
-            {catalogItem.type === 'ipos' && <>
-              <li>• <code className="bg-blue-900/40 px-1 rounded">ipos.lookupCustomer</code> — Tra cứu khách hàng iPOS theo SĐT</li>
-              <li>• <code className="bg-blue-900/40 px-1 rounded">ipos.lookupOrder</code> — Tra cứu đơn / hóa đơn iPOS</li>
-              <li>• <code className="bg-blue-900/40 px-1 rounded">ipos.createOrder</code> — Tạo đơn hàng mới trong iPOS</li>
-            </>}
             {catalogItem.type === 'nhanh' && <>
               <li>• <code className="bg-blue-900/40 px-1 rounded">nhanh.lookupCustomer</code> — Tra cứu khách hàng Nhanh.vn theo SĐT</li>
               <li>• <code className="bg-blue-900/40 px-1 rounded">nhanh.lookupOrder</code> — Tra cứu đơn hàng Nhanh.vn</li>

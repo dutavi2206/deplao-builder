@@ -5,7 +5,6 @@
  * - KiotViet:  orderDetails[], customer{id, name, contactNumber}, branchId
  * - Haravan:   line_items[], customer{first_name, phone, email}, shipping_address{...}
  * - Sapo:      line_items[], customer{}, shipping_address{}, source_name
- * - iPOS:      invoiceDetails[], customerName, customerPhone, tableId
  * - Nhanh.vn:  info{}, channel{appOrderId}, shippingAddress{}, products[], payment{}
  * - Pancake:   customer{}, items[], shippingAddress{}, paymentMethod, note
  *
@@ -209,47 +208,6 @@ function toSapo(data: GenericOrderData) {
   };
 }
 
-// ─── iPOS ───────────────────────────────────────────────────────────────────
-// Docs: iPOS POS API — tạo hóa đơn bán hàng
-// POST /api/invoices — body: { invoice: { details[], customerName, ... } }
-
-function toIPOS(data: GenericOrderData) {
-  const provinceName = data.customer.provinceName || getProvinceName(data.customer.provinceId);
-  const districtName = data.customer.districtName || getDistrictName(data.customer.provinceId, data.customer.districtId);
-  const wardName = data.customer.wardName || getWardName(data.customer.provinceId, data.customer.districtId, data.customer.wardId);
-  const fullAddress = [data.customer.address, wardName, districtName, provinceName].filter(Boolean).join(', ');
-
-  return {
-    invoice: {
-      invoiceType: 1, // 1 = Bán hàng, 2 = Trả hàng
-      details: data.items.map(item => ({
-        productId: item.productId,
-        productCode: item.productCode,
-        productName: item.productName,
-        quantity: item.quantity,
-        price: item.price,
-        discountAmount: item.discount,
-        amount: item.price * item.quantity - item.discount,
-      })),
-      customerName: data.customer.name || 'Khách vãng lai',
-      customerPhone: data.customer.phone || undefined,
-      customerEmail: data.customer.email || undefined,
-      customerAddress: fullAddress || undefined,
-      totalAmount: data.totalPayment,
-      discountAmount: data.discount,
-      // iPOS paymentMethod: CASH, BANK, CARD, MOMO, ZALOPAY, COD
-      paymentMethod: data.paymentMethod === 'cash' ? 'CASH'
-        : data.paymentMethod === 'bank_transfer' ? 'BANK'
-        : data.paymentMethod === 'card' ? 'CARD'
-        : data.paymentMethod === 'momo' ? 'MOMO'
-        : data.paymentMethod === 'zalopay' ? 'ZALOPAY'
-        : 'COD',
-      note: data.note || undefined,
-      deliveryFee: data.shippingFee || undefined,
-    },
-  };
-}
-
 // ─── Nhanh.vn ───────────────────────────────────────────────────────────────
 // Docs: https://open.nhanh.vn/
 // POST /v3.0/order/add?appId=&businessId= — body: nested v3 structure
@@ -377,13 +335,12 @@ function toPancake(data: GenericOrderData) {
 
 // ─── Public Adapter ─────────────────────────────────────────────────────────
 
-export type PlatformType = 'kiotviet' | 'haravan' | 'sapo' | 'ipos' | 'nhanh' | 'pancake';
+export type PlatformType = 'kiotviet' | 'haravan' | 'sapo' | 'nhanh' | 'pancake';
 
 const ADAPTERS: Record<PlatformType, (data: GenericOrderData) => any> = {
   kiotviet: toKiotViet,
   haravan: toHaravan,
   sapo: toSapo,
-  ipos: toIPOS,
   nhanh: toNhanh,
   pancake: toPancake,
 };
@@ -403,7 +360,7 @@ export function adaptOrderForPlatform(platform: string, data: GenericOrderData):
 }
 
 /** Danh sách nền tảng có hỗ trợ tạo đơn */
-export const SUPPORTED_ORDER_PLATFORMS: PlatformType[] = ['kiotviet', 'haravan', 'sapo', 'ipos', 'nhanh', 'pancake'];
+export const SUPPORTED_ORDER_PLATFORMS: PlatformType[] = ['kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake'];
 
 /** Tên hiển thị cho payment method theo nền tảng */
 export function getPaymentMethodLabel(method: string): string {

@@ -27,6 +27,11 @@ class HttpClientService {
     private sseReq: any = null;
     private sseConnected = false;
     private sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    /** SSE reconnect attempt counter for exponential backoff (3s → 6s → 12s → 24s → 30s cap) */
+    private sseReconnectAttempt = 0;
+    private static SSE_MAX_RECONNECT_DELAY = 30_000;
+    /** Track consecutive heartbeat failures to trigger SSE reconnect */
+    private consecutiveHeartbeatFailures = 0;
 
     private onStatusChange: ((connected: boolean, latency: number) => void) | null = null;
     private onInitialState: ((data: any) => void) | null = null;
@@ -452,6 +457,8 @@ class HttpClientService {
                 const activeWsId = WorkspaceManager.getInstance().getActiveWorkspaceId();
                 if (activeWsId === this.workspaceId) {
                     EventBroadcaster.sendDirect(channel, data);
+                } else {
+                    Logger.log(`[HttpClientService] Skipping renderer forward for ${channel}: activeWs="${activeWsId}" !== ourWs="${this.workspaceId}"`);
                 }
             } catch {
                 EventBroadcaster.sendDirect(channel, data);
@@ -492,13 +499,24 @@ class HttpClientService {
                 },
                 (res: any) => {
                     if (res.statusCode !== 200) {
-                        Logger.warn(`[HttpClientService] SSE connect failed: HTTP ${res.statusCode}, falling back to poll mode`);
+                        Logger.warn(`[HttpClientService] SSE connect failed: HTTP ${res.statusCode}`);
                         res.resume();
                         this.sseConnected = false;
+                        // Schedule reconnect (non-200 was a dead end before)
+                        if (this.connected) {
+                            const delay = Math.min(
+                                5000 * Math.pow(2, this.sseReconnectAttempt),
+                                HttpClientService.SSE_MAX_RECONNECT_DELAY
+                            );
+                            this.sseReconnectAttempt++;
+                            Logger.log(`[HttpClientService] SSE reconnect in ${delay}ms (attempt ${this.sseReconnectAttempt})`);
+                            this.sseReconnectTimer = setTimeout(() => this.connectSSE(), delay);
+                        }
                         return;
                     }
 
                     this.sseConnected = true;
+                    this.sseReconnectAttempt = 0; // Reset backoff on successful connection
                     Logger.log('[HttpClientService] 📡 SSE stream connected');
 
                     let buffer = '';
@@ -529,8 +547,12 @@ class HttpClientService {
                         this.sseReq = null;
                         Logger.log('[HttpClientService] SSE stream ended');
                         if (this.connected) {
-                            // Reconnect after 3s
-                            this.sseReconnectTimer = setTimeout(() => this.connectSSE(), 3000);
+                            const delay = Math.min(
+                                3000 * Math.pow(2, this.sseReconnectAttempt),
+                                HttpClientService.SSE_MAX_RECONNECT_DELAY
+                            );
+                            this.sseReconnectAttempt++;
+                            this.sseReconnectTimer = setTimeout(() => this.connectSSE(), delay);
                         }
                     });
 
@@ -539,7 +561,12 @@ class HttpClientService {
                         this.sseReq = null;
                         Logger.warn(`[HttpClientService] SSE stream error: ${err.message}`);
                         if (this.connected) {
-                            this.sseReconnectTimer = setTimeout(() => this.connectSSE(), 5000);
+                            const delay = Math.min(
+                                5000 * Math.pow(2, this.sseReconnectAttempt),
+                                HttpClientService.SSE_MAX_RECONNECT_DELAY
+                            );
+                            this.sseReconnectAttempt++;
+                            this.sseReconnectTimer = setTimeout(() => this.connectSSE(), delay);
                         }
                     });
                 }
@@ -550,7 +577,12 @@ class HttpClientService {
                 this.sseReq = null;
                 Logger.warn(`[HttpClientService] SSE request error: ${err.message}`);
                 if (this.connected) {
-                    this.sseReconnectTimer = setTimeout(() => this.connectSSE(), 5000);
+                    const delay = Math.min(
+                        5000 * Math.pow(2, this.sseReconnectAttempt),
+                        HttpClientService.SSE_MAX_RECONNECT_DELAY
+                    );
+                    this.sseReconnectAttempt++;
+                    this.sseReconnectTimer = setTimeout(() => this.connectSSE(), delay);
                 }
             });
 
@@ -559,7 +591,12 @@ class HttpClientService {
         } catch (err: any) {
             Logger.error(`[HttpClientService] SSE connect error: ${err.message}`);
             if (this.connected) {
-                this.sseReconnectTimer = setTimeout(() => this.connectSSE(), 5000);
+                const delay = Math.min(
+                    5000 * Math.pow(2, this.sseReconnectAttempt),
+                    HttpClientService.SSE_MAX_RECONNECT_DELAY
+                );
+                this.sseReconnectAttempt++;
+                this.sseReconnectTimer = setTimeout(() => this.connectSSE(), delay);
             }
         }
     }
@@ -574,6 +611,7 @@ class HttpClientService {
             this.sseReq = null;
         }
         this.sseConnected = false;
+        this.sseReconnectAttempt = 0;
     }
 
     // ─── Heartbeat ────────────────────────────────────────────────────
@@ -764,6 +802,7 @@ class HttpClientService {
 
     private startHeartbeat(): void {
         this.stopHeartbeat();
+        this.consecutiveHeartbeatFailures = 0;
         this.heartbeatTimer = setInterval(async () => {
             if (!this.connected) return;
 
@@ -779,13 +818,28 @@ class HttpClientService {
 
                 if (result.success) {
                     this.latencyMs = Date.now() - start;
+                    this.consecutiveHeartbeatFailures = 0;
                     this.onStatusChange?.(true, this.latencyMs);
                 } else {
+                    this.consecutiveHeartbeatFailures++;
                     this.onStatusChange?.(false, 0);
+                    // After 2 consecutive failures, force SSE reconnect if stream is down
+                    if (this.consecutiveHeartbeatFailures >= 2 && !this.sseConnected) {
+                        Logger.log(`[HttpClientService] ${this.consecutiveHeartbeatFailures} heartbeat failures, forcing SSE reconnect`);
+                        this.sseReconnectAttempt = 0; // Reset backoff for fresh reconnect attempt
+                        this.connectSSE();
+                    }
                 }
             } catch (err) {
                 this.latencyMs = 0;
+                this.consecutiveHeartbeatFailures++;
                 this.onStatusChange?.(false, 0);
+                // After 2 consecutive failures, force SSE reconnect if stream is down
+                if (this.consecutiveHeartbeatFailures >= 2 && !this.sseConnected) {
+                    Logger.log(`[HttpClientService] ${this.consecutiveHeartbeatFailures} heartbeat failures (error), forcing SSE reconnect`);
+                    this.sseReconnectAttempt = 0;
+                    this.connectSSE();
+                }
             }
         }, 15_000);
     }

@@ -5,6 +5,7 @@ interface QueueStatus {
   tokens: number;
   maxTokens?: number;
   lastSentAt: number;
+  dailyPaused?: boolean;
 }
 
 interface QueueStatusBarProps {
@@ -44,11 +45,18 @@ export default function QueueStatusBar({ status, maxTokens: maxTokensProp = 60 }
 
   return (
     <div className="flex items-center gap-3 px-4 py-2 bg-gray-800/80 border-t border-gray-700 text-xs">
-      {/* Pulse dot */}
-      <span className="flex items-center gap-1.5 text-green-400 flex-shrink-0">
-        <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-        Queue đang chạy
-      </span>
+      {/* Pulse dot or daily paused indicator */}
+      {status?.dailyPaused ? (
+        <span className="flex items-center gap-1.5 text-yellow-400 flex-shrink-0">
+          <span className="w-2 h-2 rounded-full bg-yellow-400" />
+          Tạm dừng (đạt giới hạn/ngày)
+        </span>
+      ) : (
+        <span className="flex items-center gap-1.5 text-green-400 flex-shrink-0">
+          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+          Queue đang chạy
+        </span>
+      )}
 
       {/* Token bar */}
       <div className="flex items-center gap-1.5 flex-shrink-0">

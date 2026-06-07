@@ -13,7 +13,7 @@
 
 > Phần mềm desktop quản lý Zalo Đa tài khoản tích hợp CRM, ERP, POS, Workflow và AI Assistant giúp đội nhóm bán hàng, chăm sóc khách hàng và marketing trên Zalo vận hành tập trung trong một ứng dụng duy nhất.
 
-[![Version](https://img.shields.io/badge/version-26.4.3-22c55e)](#)
+[![Version](https://img.shields.io/badge/version-26.4.7-22c55e)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3b82f6)](#-runtime-requirements)
 [![Electron](https://img.shields.io/badge/Electron-41-47848f?logo=electron&logoColor=white)](#)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](#)
@@ -25,23 +25,37 @@
 [![Support](https://img.shields.io/badge/support-GitHub_Issues-0ea5e9)](https://github.com/babyvibe/deplao-builder/issues)
 
 
-### ⬇️ Tải xuống nhanh
+## ⬇️ Tải xuống
 
-<p>
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.4.3.exe">
-    <img src="https://img.shields.io/badge/%F0%9F%AA%9F_Windows-Deplao--Setup--26.4.3.exe-0078d4?style=for-the-badge" alt="Download Windows" />
-  </a>
-  &nbsp;
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.3-arm64.dmg">
-    <img src="https://img.shields.io/badge/%F0%9F%8D%8E_macOS_M1%2B-Deplao--26.4.3--arm64.dmg-000000?style=for-the-badge" alt="Download macOS Apple Silicon" />
-  </a>
-  &nbsp;
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.3.dmg">
-    <img src="https://img.shields.io/badge/%F0%9F%8D%8E_macOS_Intel-Deplao--26.4.3.dmg-000000?style=for-the-badge" alt="Download macOS Intel" />
-  </a>
+<table>
+<tr>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.4.7.exe">
+<img src="https://img.shields.io/badge/🪟_Windows-v26.4.7-0078d4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows" />
+</a>
+<br>
+<sub>Deplao-Setup-26.4.7.exe</sub>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.7-arm64.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_M1+-v26.4.7-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Apple Silicon" />
+</a>
+<br>
+<sub>Deplao-26.4.7-arm64.dmg</sub>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.7.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_Intel-v26.4.7-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Intel" />
+</a>
+<br>
+<sub>Deplao-26.4.7.dmg</sub>
+</td>
+</tr>
+</table>
+
+<p align="center">
+👉 <strong><a href="https://github.com/babyvibe/deplao-builder/releases">Xem tất cả phiên bản</a></strong>
 </p>
-
-👉 Tất cả phiên bản: https://github.com/babyvibe/deplao-builder/releases
 
 <details>
 <summary>⚠️ Lưu ý khi mở file cài đặt (bị chặn bởi Windows / macOS)</summary>

@@ -25,6 +25,7 @@ export function registerLoginIpc(mainWindow: BrowserWindow | null) {
             console.log(`[loginIpc] Starting QR login for tempId: ${tempId}`);
             loginService.loginQR(tempId, proxyId ?? null).catch((err) => {
                 console.error(`[loginIpc] QR login error: ${err.message}`);
+                EventBroadcaster.broadcastQRUpdate(tempId, '', 'error');
             });
             return { success: true };
         } catch (error: any) {

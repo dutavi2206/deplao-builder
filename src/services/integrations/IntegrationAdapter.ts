@@ -4,7 +4,6 @@ export type IntegrationType =
   | 'kiotviet'
   | 'haravan'
   | 'sapo'
-  | 'ipos'
   | 'nhanh'
   | 'pancake'
   | 'casso'

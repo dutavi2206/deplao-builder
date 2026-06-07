@@ -1020,22 +1020,10 @@ export default class ZaloService {
         }
     }
 
-    public async forwardMessage(message: string, threadIds: any[], type?: ThreadType): Promise<ForwardMessageResponse> {
+    public async forwardMessage(payload: ForwardMessagePayload, threadIds: string[], type?: ThreadType): Promise<ForwardMessageResponse> {
         if (!this.api) {
             throw new Error("API not initialized. Please ensure you've called initialize() first.");
         }
-
-        const parsedMessage = JSON.parse(message);
-        let payload: ForwardMessagePayload = {
-            message: parsedMessage.data.content,
-            // ttl: 60,
-            // reference?: {
-            //     id: string;
-            //     ts: number;
-            //     logSrcType: number;
-            //     fwLvl: number;
-            // };
-        };
 
         type = convertThreadType(type);
         try {

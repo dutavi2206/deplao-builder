@@ -20,6 +20,7 @@ export default function TopBar() {
   const { theme, setTheme, showNotification } = useAppStore();
   const { activeAccountId } = useAccountStore();
   const [loadingOldMsgs, setLoadingOldMsgs] = useState(false);
+  const [lockScreenEnabled, setLockScreenEnabled] = useState(false);
 
   // Update state
   const { status: updateStatus, updateInfo, platform, setDismissed } = useUpdateStore();
@@ -67,6 +68,13 @@ export default function TopBar() {
 
   useEffect(() => {
     ipc.window?.isMaximized().then(setIsMaximized);
+  }, []);
+
+  // Check lock screen status
+  useEffect(() => {
+    ipc.lockScreen?.status().then(res => {
+      if (res?.success && res.enabled) setLockScreenEnabled(true);
+    });
   }, []);
 
   // Đóng macOS dropdown khi click ra ngoài
@@ -318,6 +326,37 @@ export default function TopBar() {
           </div>
         )}
 
+        {/* Hướng dẫn sử dụng → Settings > Giới thiệu > Tổng quan */}
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('nav:view', { detail: { view: 'settings' } }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('nav:settings', { detail: { tab: 'introduction', subtab: 'overview' } })), 80);
+          }}
+          className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-blue-400 transition-colors"
+          title="Hướng dẫn sử dụng"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        </button>
+
+        {/* Báo lỗi → Settings > Giới thiệu > Hướng dẫn báo lỗi */}
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('nav:view', { detail: { view: 'settings' } }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('nav:settings', { detail: { tab: 'introduction', subtab: 'bugreport' } })), 80);
+          }}
+          className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-red-400 transition-colors"
+          title="Báo lỗi"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 2l1.88 1.88M14.12 3.88L16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/>
+            <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/>
+            <path d="M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M6 17H2M18 13h4M17.47 9c1.93-.2 3.53-1.9 3.53-4M18 17h4"/>
+          </svg>
+        </button>
+
         {/* GitHub Star button */}
         <button
           onClick={() => ipc.shell?.openExternal(SUPPORT_GITHUB_URL)}
@@ -329,6 +368,20 @@ export default function TopBar() {
             <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
           </svg>
         </button>
+
+        {/* Lock screen button — only visible when lock screen is enabled */}
+        {lockScreenEnabled && (
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('lockScreen:lock'))}
+            className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-amber-400 transition-colors"
+            title="Khoá ứng dụng (Ctrl+Shift+L)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </button>
+        )}
 
         {/* Theme toggle */}
         <button

@@ -78,7 +78,6 @@ const TYPE_META: Record<string, { icon: string; color: string; name: string }> =
   kiotviet: { icon: '🛒', color: 'bg-orange-500', name: 'KiotViet' },
   haravan:  { icon: '🏪', color: 'bg-indigo-500', name: 'Haravan' },
   sapo:     { icon: '🟢', color: 'bg-emerald-500', name: 'Sapo' },
-  ipos:     { icon: '🍽️', color: 'bg-rose-500', name: 'iPOS' },
   nhanh:    { icon: '⚡', color: 'bg-yellow-600', name: 'Nhanh.vn' },
   pancake:  { icon: '🥞', color: 'bg-amber-500', name: 'Pancake POS' },
   ghn:      { icon: '📦', color: 'bg-red-500', name: 'GHN Express' },
@@ -139,19 +138,6 @@ const ACTIONS_BY_TYPE: Record<string, QuickActionDef[]> = {
     { action: 'lookupProduct', label: 'Tìm sản phẩm', icon: '🔍', desc: 'Tìm theo tên',
       fields: [{ key: 'keyword', label: 'Tên sản phẩm', placeholder: 'Áo...' }] },
     { action: 'createOrder', label: 'Tạo đơn hàng', icon: '✏️', desc: 'Tạo đơn hàng mới trong Sapo',
-      fields: [] },
-  ],
-  ipos: [
-    { action: 'lookupCustomer', label: 'Tra cứu khách hàng', icon: '👤', desc: 'Tìm theo SĐT',
-      fields: [{ key: 'phone', label: 'Số điện thoại', placeholder: '0901234567' }] },
-    { action: 'lookupOrder', label: 'Tra cứu hóa đơn', icon: '📋', desc: 'Tìm theo SĐT hoặc mã đơn',
-      fields: [
-        { key: 'phone', label: 'SĐT', placeholder: '0901234567', optional: true },
-        { key: 'orderId', label: 'Mã hóa đơn', placeholder: 'ID hóa đơn', optional: true },
-      ] },
-    { action: 'lookupProduct', label: 'Tìm sản phẩm / món', icon: '🔍', desc: 'Tìm theo tên',
-      fields: [{ key: 'keyword', label: 'Tên sản phẩm / món', placeholder: 'Cà phê...' }] },
-    { action: 'createOrder', label: 'Tạo đơn / hóa đơn', icon: '✏️', desc: 'Tạo hóa đơn mới trong iPOS',
       fields: [] },
   ],
   nhanh: [
@@ -247,7 +233,6 @@ const FAKE_INTEGRATIONS: SavedIntegration[] = [
   { id: 'fake-ghtk',     type: 'ghtk',     name: 'GHTK Ship',    enabled: true, connectedAt: Date.now() - 432000000 },
   { id: 'fake-casso',    type: 'casso',    name: 'Casso Bank',   enabled: true, connectedAt: Date.now() - 518400000 },
   { id: 'fake-sepay',    type: 'sepay',    name: 'SePay QR',     enabled: true, connectedAt: Date.now() - 604800000 },
-  { id: 'fake-ipos',     type: 'ipos',     name: 'iPOS Quán',    enabled: true, connectedAt: Date.now() - 691200000 },
   { id: 'fake-nhanh',    type: 'nhanh',    name: 'Nhanh.vn',     enabled: true, connectedAt: Date.now() - 777600000 },
   { id: 'fake-pancake',  type: 'pancake',  name: 'Pancake POS',  enabled: true, connectedAt: Date.now() - 850000000 },
 ];

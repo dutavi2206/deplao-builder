@@ -85,6 +85,22 @@ function getOpenAICompatibleUrl(platform: string): string {
   }
 }
 
+/** Normalize legacy/incorrect model names to current API model IDs */
+function normalizeModelName(model: string): string {
+  const aliases: Record<string, string> = {
+    // DeepSeek — fake versioned names that were never real API model IDs
+    'deepseek-chat-v3.2':    'deepseek-v4-flash',
+    'deepseek-chat-v3.1':    'deepseek-v4-flash',
+    'deepseek-reasoner-r1.5':'deepseek-v4-pro',
+    // Gemini — wrong model IDs (missing -preview suffix or wrong version)
+    'gemini-3.1-pro':        'gemini-3.1-pro-preview',
+    'gemini-3.1-flash':      'gemini-3.5-flash',
+    'gemini-3.0-flash':      'gemini-3-flash-preview',
+    'gemini-3.0-flash-lite': 'gemini-3-flash-preview',
+  };
+  return aliases[model] ?? model;
+}
+
 function openaiMessagesToGemini(messages: ChatMessage[]): any[] {
   const contents: any[] = [];
   let systemText = '';
@@ -332,10 +348,11 @@ VÍ DỤ ĐẦU RA ĐÚNG:
   ): Promise<{ result: string; totalTokens: number; promptTokens: number; completionTokens: number }> {
     const maxTokens = maxTokensOverride || assistant.maxTokens || 1000;
     const temperature = assistant.temperature ?? 0.7;
+    const model = normalizeModelName(assistant.model);
 
     // Debug: log request info
     const keyPreview = assistant.apiKey ? `${assistant.apiKey.substring(0, 8)}...${assistant.apiKey.substring(assistant.apiKey.length - 4)}` : '(empty)';
-    Logger.info(`[AIAssistant] callLLM → platform=${assistant.platform}, model=${assistant.model}, keyPreview=${keyPreview}, maxTokens=${maxTokens}`);
+    Logger.info(`[AIAssistant] callLLM → platform=${assistant.platform}, model=${model}${model !== assistant.model ? ` (normalized from ${assistant.model})` : ''}, keyPreview=${keyPreview}, maxTokens=${maxTokens}`);
 
     let result = '';
     let promptTokens = 0;
@@ -345,10 +362,10 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     try {
       if (assistant.platform === 'gemini') {
         const geminiContents = openaiMessagesToGemini(messages);
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${assistant.model}:generateContent?key=${keyPreview}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keyPreview}`;
         Logger.info(`[AIAssistant] Gemini URL (masked): ${geminiUrl}`);
         const res = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${assistant.model}:generateContent?key=${assistant.apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${assistant.apiKey}`,
           {
             contents: geminiContents,
             generationConfig: { maxOutputTokens: maxTokens, temperature },
@@ -369,7 +386,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         const res = await axios.post(
           'https://api.anthropic.com/v1/messages',
           {
-            model: assistant.model,
+            model,
             max_tokens: maxTokens,
             ...(systemText ? { system: systemText } : {}),
             messages: claudeMessages,
@@ -389,13 +406,13 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         totalTokens = promptTokens + completionTokens;
       } else {
         const apiUrl = getOpenAICompatibleUrl(assistant.platform);
-        Logger.info(`[AIAssistant] OpenAI-compat URL: ${apiUrl}, model: ${assistant.model}`);
+        Logger.info(`[AIAssistant] OpenAI-compat URL: ${apiUrl}, model: ${model}`);
         const tokenParam = assistant.platform === 'openai'
           ? { max_completion_tokens: maxTokens }
           : { max_tokens: maxTokens };
         const res = await axios.post(
           apiUrl,
-          { model: assistant.model, messages, ...tokenParam, temperature },
+          { model, messages, ...tokenParam, temperature },
           {
             headers: {
               Authorization: `Bearer ${assistant.apiKey}`,

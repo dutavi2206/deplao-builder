@@ -7,6 +7,7 @@ import { UserProfilePopup } from '../common/UserProfilePopup';
 import LabelPicker, { ActiveLabels, EditLabelsModal } from './LabelPicker';
 import useIsMobile from '@/hooks/useIsMobile';
 import ChannelBadge from '../common/ChannelBadge';
+import { extractUserProfile } from '../../../utils/profileUtils';
 
 interface HeaderLocalLabel {
   id: number;
@@ -35,6 +36,7 @@ export default function ChatHeader() {
   const [labelPickerOpen, setLabelPickerOpen] = useState<{ x: number; y: number } | null>(null);
   const [editLabelsOpen, setEditLabelsOpen] = useState(false);
   const [loadingGroupMsgs, setLoadingGroupMsgs] = useState(false);
+  const [aliasRefreshing, setAliasRefreshing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -304,6 +306,41 @@ export default function ChatHeader() {
     }).catch(() => {});
   };
 
+  /** Reload alias (biệt danh) từ API — chỉ cho user DM trên kênh Zalo */
+  const handleRefreshAlias = async () => {
+    if (!activeThreadId || !activeAccountId || activeThreadType === 1) return;
+    const acc = getActiveAccount();
+    if (!acc || (acc.channel || 'zalo') !== 'zalo') return;
+    setAliasRefreshing(true);
+    try {
+      const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
+      const res = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
+      const rawProfile = res?.response?.changed_profiles?.[activeThreadId]
+        || res?.response?.data?.[activeThreadId];
+      if (rawProfile) {
+        const { displayName: newName, avatar: newAvatar, phone: newPhone, gender, birthday, alias: newAlias } = extractUserProfile(rawProfile);
+        const patch: any = { contact_id: activeThreadId };
+        if (newName) patch.display_name = newName;
+        if (newAvatar) patch.avatar_url = newAvatar;
+        if (newPhone) patch.phone = newPhone;
+        if (newAlias) patch.alias = newAlias;
+        if (Object.keys(patch).length > 1) {
+          updateContact(activeAccountId, patch);
+          await ipc.db?.updateContactProfile({
+            zaloId: activeAccountId, contactId: activeThreadId,
+            displayName: newName, avatarUrl: newAvatar, phone: newPhone,
+            gender, birthday,
+          });
+          if (newAlias) {
+            ipc.db?.setContactAlias({ zaloId: activeAccountId, contactId: activeThreadId, alias: newAlias }).catch(() => {});
+          }
+        }
+      }
+    } catch {} finally {
+      setAliasRefreshing(false);
+    }
+  };
+
   if (!activeThreadId || !activeAccountId) return null;
 
   const contactList = contacts[activeAccountId] || [];
@@ -414,20 +451,38 @@ export default function ChatHeader() {
         </div>
 
         <div className="flex-1 min-w-0">
-          {/* Name — click to copy */}
-          <button
-            onClick={handleCopyName}
-            title={copied ? 'Đã sao chép!' : 'Nhấn để sao chép tên'}
-            className="flex items-center gap-1 group text-left min-w-0 max-w-full overflow-hidden"
-          >
-            <p className="text-md font-semibold text-white truncate group-hover:text-blue-300 transition-colors">{displayName}</p>
-            {copied
-              ? <span className="text-xs text-green-400 flex-shrink-0">✓</span>
-              : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-0 group-hover:opacity-50 flex-shrink-0 text-gray-400 transition-opacity">
-                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          {/* Name row — name + alias reload on the same line */}
+          <div className="flex items-center gap-1 min-w-0">
+            {/* Name — click to copy */}
+            <button
+              onClick={handleCopyName}
+              title={copied ? 'Đã sao chép!' : 'Nhấn để sao chép tên'}
+              className="flex items-center gap-1 group text-left min-w-0 overflow-hidden"
+            >
+              <p className="text-md font-semibold text-white truncate group-hover:text-blue-300 transition-colors">{displayName}</p>
+              {copied
+                ? <span className="text-xs text-green-400 flex-shrink-0">✓</span>
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-0 group-hover:opacity-50 flex-shrink-0 text-gray-400 transition-opacity">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+              }
+            </button>
+            {/* Alias reload button — chỉ hiện cho user DM trên Zalo */}
+            {!isGroup && (contact?.channel || 'zalo') === 'zalo' && (
+              <button
+                title="Tải lại biệt danh"
+                onClick={handleRefreshAlias}
+                disabled={aliasRefreshing}
+                className="flex-shrink-0 text-gray-400 hover:text-white transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  className={aliasRefreshing ? 'animate-spin' : ''}>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
                 </svg>
-            }
-          </button>
+              </button>
+            )}
+          </div>
           {/* Active labels row — clickable to open label picker */}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             {(contact?.channel || 'zalo') !== 'facebook' && (

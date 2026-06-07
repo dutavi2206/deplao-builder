@@ -37,6 +37,7 @@ import AddAccountModal from "@/components/auth/AddAccountModal";
 import EmployeeConnectionBanner from "@/components/common/EmployeeConnectionBanner";
 import { useWorkspaceStore } from './store/workspaceStore';
 import { useEmployeeStore } from './store/employeeStore';
+import LockScreen from './components/auth/LockScreen';
 
 const HEALTH_CHECK_INTERVAL_MS = 60 * 1000; // 1 phút
 const NETWORK_RECONNECT_COOLDOWN_MS = 15 * 1000; // 15 giây
@@ -114,6 +115,8 @@ export default function App() {
   const { activeThreadId, activeThreadType, contacts } = useChatStore();
   const { activeAccountId } = useAccountStore();
   const [initializing, setInitializing] = useState(true);
+  const [lockEnabled, setLockEnabled] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   const isMobile = useIsMobile();
   const { mobileShowChat, setMobileShowChat } = useAppStore();
 
@@ -121,6 +124,34 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  // ─── Lock screen: check status on mount ─────────────────────────────────
+  useEffect(() => {
+    ipc.lockScreen.status().then(res => {
+      if (res.success && res.enabled) {
+        setLockEnabled(true);
+        setIsLocked(true);
+      }
+    });
+  }, []);
+
+  // ─── Lock screen: listen for lock events + keyboard shortcut ───────────
+  useEffect(() => {
+    if (!lockEnabled) return;
+    const handleLockEvent = () => setIsLocked(true);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        setIsLocked(true);
+      }
+    };
+    window.addEventListener('lockScreen:lock', handleLockEvent);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('lockScreen:lock', handleLockEvent);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [lockEnabled]);
 
   // ─── Employee permission guard: redirect to dashboard if current view is not allowed ──
   useEffect(() => {
@@ -233,6 +264,10 @@ export default function App() {
   }, []);
 
   const reconnectAfterNetworkRestore = useCallback(async () => {
+    // Skip for employee (remote) workspace — boss owns Zalo connections
+    const netActiveWs = await ipc.workspace?.getActive?.().then((r: any) => r?.workspace).catch(() => null);
+    if (netActiveWs?.type === 'remote') return;
+
     const currentAccounts = useAccountStore.getState().accounts.filter(a => (a.channel || 'zalo') === 'zalo');
     if (!currentAccounts.length) return;
 
@@ -651,6 +686,45 @@ export default function App() {
     return () => unsub?.();
   }, []);
 
+  // ─── Handle sync completion — reload data after full/delta sync ────────────
+  useEffect(() => {
+    const unsub = window.electronAPI?.on('workspace:syncComplete', async (data: any) => {
+      if (!data?.workspaceId) return;
+      const activeWsId = useWorkspaceStore.getState().activeWorkspaceId;
+      if (data.workspaceId !== activeWsId) return;
+
+      console.log(`[App] workspace:syncComplete received: type=${data.syncType} workspace=${data.workspaceId}`);
+
+      // Reload contacts from DB for all assigned accounts
+      const empStore = useEmployeeStore.getState();
+      const accounts = empStore.assignedAccounts || [];
+      if (accounts.length > 0) {
+        for (const zaloId of accounts) {
+          try {
+            const contactsRes = await Promise.race([
+              ipc.db?.getContacts(zaloId),
+              new Promise(r => setTimeout(() => r(null), 5000)),
+            ]) as any;
+            if (contactsRes?.contacts) {
+              setContacts(zaloId, contactsRes.contacts);
+            }
+          } catch {}
+        }
+        // Reload flags
+        const { loadFlags } = useAppStore.getState();
+        for (const zaloId of accounts) {
+          try {
+            await Promise.race([
+              loadFlags(zaloId),
+              new Promise(r => setTimeout(r, 3000)),
+            ]);
+          } catch {}
+        }
+      }
+    });
+    return () => unsub?.();
+  }, [setContacts]);
+
   // ─── nav:view — navigate to a top-level view from other components ───────────
   useEffect(() => {
     const handler = (e: Event) => {
@@ -826,12 +900,18 @@ export default function App() {
           // Sync badge
           ipc.app?.setBadge(getFilteredUnreadCount());
 
-          // 3. Auto-reconnect saved Zalo accounts
-          for (const acc of accountsRes.accounts) {
-            if ((acc.channel || 'zalo') !== 'zalo') continue; // Skip FB accounts
-            if (!acc.isConnected) {
-              const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
-              ipc.login?.connectAccount(auth).catch(() => {});
+          // 3. Auto-reconnect saved Zalo accounts (ONLY for boss/local workspace)
+          // Employee (remote) workspace must NOT connect Zalo directly —
+          // boss owns all Zalo connections and relays events via SSE.
+          const initActiveWs = await ipc.workspace?.getActive?.().then((r: any) => r?.workspace).catch(() => null);
+          const isEmployeeMode = initActiveWs?.type === 'remote';
+          if (!isEmployeeMode) {
+            for (const acc of accountsRes.accounts) {
+              if ((acc.channel || 'zalo') !== 'zalo') continue; // Skip FB accounts
+              if (!acc.isConnected) {
+                const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
+                ipc.login?.connectAccount(auth).catch(() => {});
+              }
             }
           }
 
@@ -894,6 +974,10 @@ export default function App() {
 
   useEffect(() => {
     const runHealthCheck = async () => {
+      // Skip health check for employee (remote) workspace — boss owns Zalo connections
+      const hcActiveWs = await ipc.workspace?.getActive?.().then((r: any) => r?.workspace).catch(() => null);
+      if (hcActiveWs?.type === 'remote') return;
+
       const currentAccounts = useAccountStore.getState().accounts;
       if (!currentAccounts.length) return;
 
@@ -966,6 +1050,11 @@ export default function App() {
     if (showIntegrationQuickPanel) toggleIntegrationQuickPanel();
     if (showAIQuickPanel) toggleAIQuickPanel();
   };
+
+  // ─── Lock screen gate: block entire app until unlocked ───────────────────
+  if (lockEnabled && isLocked) {
+    return <LockScreen onUnlock={() => setIsLocked(false)} />;
+  }
 
   if (initializing) {
     return (
@@ -1090,15 +1179,6 @@ export default function App() {
                         <div className="absolute inset-y-0 right-0 z-40 max-w-[92vw] overflow-hidden"
                             onClick={(e) => e.stopPropagation()}>
                           <ConversationInfo />
-                          <button type="button"
-                              onClick={closeRightInfoOverlay}
-                              title="Đóng"
-                              className="absolute top-2 left-2 z-50 w-8 h-8 rounded-full text-gray-200 flex items-center justify-center transition-colors">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <line x1="18" y1="6" x2="6" y2="18" />
-                              <line x1="6" y1="6" x2="18" y2="18" />
-                            </svg>
-                          </button>
                         </div>
                     )}
                     {/* Right panel: integration quick panel */}

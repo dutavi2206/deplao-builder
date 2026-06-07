@@ -10,6 +10,7 @@ import CampaignList from './campaigns/CampaignList';
 import CampaignDetail from './campaigns/CampaignDetail';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
 import CampaignCloneModal from './campaigns/CampaignCloneModal';
+import TargetSelector from './campaigns/TargetSelector';
 import ZaloLabelSelector from './tags/ZaloLabelSelector';
 import LocalLabelSelector from '@/components/common/LocalLabelSelector';
 import QueueStatusBar from './queue/QueueStatusBar';
@@ -20,6 +21,41 @@ import CRMRequestsTab from './search/CRMRequestsTab';
 import AddToContactsModal from './contacts/AddToContactsModal';
 import AccountSelectorDropdown from '@/components/common/AccountSelectorDropdown';
 
+
+// ── Wizard Step Indicator ────────────────────────────────────────────────
+function WizardStepIndicator({ currentStep }: { currentStep: number }) {
+  const steps = [
+    { num: 1, label: 'Tạo chiến dịch' },
+    { num: 2, label: 'Thêm liên hệ' },
+  ];
+  return (
+    <div className="flex items-center justify-center gap-2 py-3">
+      {steps.map((s, i) => (
+        <React.Fragment key={s.num}>
+          <div className="flex items-center gap-2">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold ${
+              s.num < currentStep
+                ? 'bg-blue-600 text-white'
+                : s.num === currentStep
+                  ? 'bg-blue-600/20 text-blue-400 border-2 border-blue-500'
+                  : 'bg-gray-700 text-gray-500'
+            }`}>
+              {s.num < currentStep ? '✓' : s.num}
+            </div>
+            <span className={`text-xs font-medium ${
+              s.num <= currentStep ? 'text-gray-200' : 'text-gray-500'
+            }`}>{s.label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className={`w-8 h-0.5 ${
+              s.num < currentStep ? 'bg-blue-500' : 'bg-gray-700'
+            }`} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
 
 export default function CRMPage() {
   const { activeAccountId, accounts, setActiveAccount } = useAccountStore();
@@ -43,6 +79,11 @@ export default function CRMPage() {
   const [selectedCampaignForAdd, setSelectedCampaignForAdd] = useState<number | null>(null);
   const [showCreateInAddModal, setShowCreateInAddModal] = useState(false);
   const [showPhoneImport, setShowPhoneImport] = useState(false);
+
+  // ── Campaign creation wizard state ──────────────────────────────────
+  const [wizardActive, setWizardActive] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0); // 0=off, 2=add contacts
+  const [wizardCampaignId, setWizardCampaignId] = useState<number | null>(null);
 
 
   // ── Local labels state ──────────────────────────────────────────────────
@@ -144,6 +185,7 @@ export default function CRMPage() {
           tokens: res.status.tokens,
           maxTokens: res.status.maxTokens ?? 60,
           lastSentAt: res.status.lastSentAt,
+          dailyPaused: res.status.dailyPaused,
         });
       }
     });
@@ -158,6 +200,7 @@ export default function CRMPage() {
         tokens: data.tokens,
         maxTokens: data.maxTokens ?? 60,
         lastSentAt: data.lastSentAt,
+        dailyPaused: false,
       });
       loadCampaigns();
     });
@@ -169,6 +212,7 @@ export default function CRMPage() {
         tokens: data.tokens,
         maxTokens: data.maxTokens ?? 60,
         lastSentAt: data.lastSentAt,
+        dailyPaused: data.dailyPaused,
       });
     });
     const unsubDone = ipc.on?.('crm:campaignDone', (data: any) => {
@@ -198,6 +242,12 @@ export default function CRMPage() {
       await loadCampaigns();
       store.setActiveCampaign(res.id);
       showNotification('Đã tạo chiến dịch', 'success');
+      // Wizard flow: advance to step 2 (add contacts) after saving
+      if (wizardActive) {
+        setWizardCampaignId(res.id);
+        setShowCreateCampaign(false);
+        setWizardStep(2);
+      }
     }
   };
 
@@ -266,6 +316,41 @@ export default function CRMPage() {
       if (res.id) setSelectedCampaignForAdd(res.id);
       showNotification('Đã tạo chiến dịch', 'success');
     }
+  };
+
+  // ── Wizard handlers ─────────────────────────────────────────────────────
+  const handleWizardConfirmTargets = async (contacts: any[]) => {
+    if (!wizardCampaignId || !activeAccountId) return;
+    const toAdd = contacts.map(c => ({
+      contactId: c.contact_id,
+      displayName: c.alias || c.display_name,
+      avatar: c.avatar,
+      phone: c.phone || '',
+    }));
+    await handleAddContactsToCampaign(wizardCampaignId, toAdd);
+    // Wizard complete
+    setWizardActive(false);
+    setWizardStep(0);
+    setWizardCampaignId(null);
+  };
+
+  const handleWizardDismiss = () => {
+    setWizardActive(false);
+    setWizardStep(0);
+    setWizardCampaignId(null);
+  };
+
+  const handleWizardCreateClose = () => {
+    // On close in wizard mode = advance to step 2
+    setShowCreateCampaign(false);
+    setWizardStep(2);
+  };
+
+  const startWizard = () => {
+    setWizardActive(true);
+    setWizardStep(0);
+    setWizardCampaignId(null);
+    setShowCreateCampaign(true);
   };
 
   // ── Bulk actions ─────────────────────────────────────────────────────────
@@ -638,7 +723,7 @@ export default function CRMPage() {
                   loading={store.campaignsLoading}
                   activeId={store.activeCampaignId}
                   onSelect={store.setActiveCampaign}
-                  onCreate={() => setShowCreateCampaign(true)}
+                  onCreate={startWizard}
                   onDelete={handleDeleteCampaign}
                   onClone={id => { setCloneCampaignId(id); setShowCloneCampaign(true); }}
                   onUpdateStatus={handleUpdateCampaignStatus}
@@ -662,7 +747,7 @@ export default function CRMPage() {
                       <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
                     <p className="text-sm">Chọn chiến dịch để xem chi tiết</p>
-                    <button onClick={() => setShowCreateCampaign(true)}
+                    <button onClick={startWizard}
                       className="mt-3 text-xs text-blue-400 hover:text-blue-300">Tạo chiến dịch mới →</button>
                   </div>
                 )}
@@ -712,7 +797,25 @@ export default function CRMPage() {
 
       {/* ── Modals ── */}
       {showCreateCampaign && (
-        <CampaignCreateModal zaloId={activeAccountId || ''} onClose={() => setShowCreateCampaign(false)} onSave={handleCreateCampaign} />
+        <CampaignCreateModal
+          zaloId={activeAccountId || ''}
+          onClose={wizardActive ? handleWizardCreateClose : () => setShowCreateCampaign(false)}
+          onSave={handleCreateCampaign}
+        />
+      )}
+
+      {/* Wizard: Step 2 — Add contacts */}
+      {wizardActive && wizardStep === 2 && wizardCampaignId !== null && (
+        <TargetSelector
+          zaloId={activeAccountId || ''}
+          allLabels={zaloLabels}
+          localLabels={localLabels}
+          localLabelThreadMap={localLabelThreadMap}
+          existingContactIds={new Set()}
+          onConfirm={handleWizardConfirmTargets}
+          onClose={handleWizardDismiss}
+          headerContent={<WizardStepIndicator currentStep={2} />}
+        />
       )}
 
       {showCloneCampaign && cloneCampaignId !== null && (() => {

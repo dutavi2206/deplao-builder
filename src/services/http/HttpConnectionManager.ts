@@ -30,6 +30,7 @@ class HttpConnectionManager {
     private snapshots: Map<string, WorkspaceSnapshot> = new Map();
     private mainWindow: BrowserWindow | null = null;
     private connecting: Set<string> = new Set();
+    private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 
     public static getInstance(): HttpConnectionManager {
         if (!HttpConnectionManager.instance) {
@@ -212,6 +213,39 @@ class HttpConnectionManager {
             } catch (err: any) {
                 Logger.warn(`[HttpConnectionManager] Auto-connect failed for "${ws.name}": ${err.message}`);
             }
+        }
+    }
+
+    /**
+     * Start periodic health check that detects dead connections and triggers reconnect.
+     * Called once at app startup after connectAutoWorkspaces.
+     */
+    public startHealthCheck(intervalMs = 60_000): void {
+        this.stopHealthCheck();
+        this.healthCheckTimer = setInterval(async () => {
+            const wm = WorkspaceManager.getInstance();
+            for (const [wsId, client] of this.clients) {
+                const status = client.service.getStatus();
+                if (status.connected) continue; // Already connected — skip
+
+                const ws = wm.getWorkspaceById(wsId);
+                if (!ws || ws.type !== 'remote' || !ws.bossUrl || !ws.token) continue;
+
+                Logger.log(`[HttpConnectionManager] Health check: "${wsId}" disconnected — attempting reconnect`);
+                try {
+                    await this.connect(wsId, ws.bossUrl, ws.token);
+                } catch (err: any) {
+                    Logger.warn(`[HttpConnectionManager] Health check reconnect failed for "${wsId}": ${err.message}`);
+                }
+            }
+        }, intervalMs);
+        Logger.log(`[HttpConnectionManager] Health check started (interval=${intervalMs}ms)`);
+    }
+
+    public stopHealthCheck(): void {
+        if (this.healthCheckTimer) {
+            clearInterval(this.healthCheckTimer);
+            this.healthCheckTimer = null;
         }
     }
 

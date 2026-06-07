@@ -86,8 +86,6 @@ function normalizeProduct(raw: any, platform: string): POSProduct {
     image = raw.image?.src || raw.images?.[0]?.src || raw.featured_image || '';
   } else if (platform === 'sapo') {
     image = raw.image?.src || raw.images?.[0]?.src || '';
-  } else if (platform === 'ipos') {
-    image = raw.image_url || raw.image || raw.thumbnail || '';
   } else if (platform === 'nhanh') {
     image = raw.images?.avatar || raw.image || raw.imageUrl || raw.smallImage || raw.images?.[0] || '';
   } else if (platform === 'pancake') {

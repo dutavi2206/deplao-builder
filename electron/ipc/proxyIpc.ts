@@ -107,7 +107,7 @@ export function registerProxyIpc() {
 
             // Test bằng cách kết nối đến URL qua proxy (HEAD request)
             const https = require('https');
-            const URLS = ['https://www.google.com', 'https://httpbin.org/get'];
+            const URLS = ['https://id.zalo.me', 'https://zalo.me', 'https://www.google.com'];
 
             const testReq = (url: string): Promise<{ ok: boolean; status: number; ms: number }> =>
                 new Promise((resolve) => {

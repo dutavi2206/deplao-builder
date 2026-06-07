@@ -14,6 +14,152 @@ interface VersionEntry {
 // ─── Changelog data — thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '26.4.7',
+    date: '06/2026',
+    type: 'minor',
+    highlights: [
+      '🔗 Chiến dịch CRM: thêm mới chọn đối tượng theo UID trực tiếp',
+      '🔄 Tải lại biệt danh (alias) — nút reload trên header và tự động tìm alias mỗi ngày',
+      '📊 Log chiến dịch chi tiết hơn — lưu response và lỗi từng block',
+      '📡 Nâng cấp kết nối SSE — exponential backoff, tự reconnect khi mất kết nối',
+      '📖 Hướng dẫn sử dụng & báo lỗi mới — truy cập nhanh từ TopBar',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Chiến dịch CRM: thêm mode chọn đối tượng theo UID — nhập danh sách UID trực tiếp, tra cứu tên khi gửi',
+          'Tải lại biệt danh: nút reload alias trên ChatHeader và ConversationInfo panel cho hội thoại 1-1 trên Zalo',
+          'Tự động refresh alias nền mỗi 24 giờ khi mở hội thoại — giữ biệt danh luôn cập nhật',
+          'Auto-fetch thông tin liên hệ khi mở hội thoại chỉ có UID (chưa có tên/avatar) — tự động lấy từ API',
+          'Tự động tải lại dữ liệu (contacts, flags) sau khi đồng bộ full/delta từ workspace khác',
+          'Dashboard: thêm tooltip giải thích cho nút Gộp tài khoản, Thêm workspace và Hỗ trợ khi rê chuột',
+          'TopBar: thêm nút truy cập nhanh Hướng dẫn sử dụng và Báo lỗi',
+          'Trang Hướng dẫn báo lỗi mới (Cài đặt → Giới thiệu → Hướng dẫn báo lỗi) — quy trình 5 bước với ví dụ mẫu',
+          'Health check tự động cho workspace từ xa — kiểm tra và reconnect mỗi 60 giây',
+        ],
+      },
+      {
+        category: 'improved',
+        items: [
+          'Nâng cấp kết nối SSE: exponential backoff (3s → 30s cap), tự reconnect khi heartbeat fail 2 lần liên tiếp',
+          'Log chiến dịch CRM: lưu chi tiết API response và error message từng block vào send history',
+          'CSV export: SĐT và UID không bị Excel chuyển thành scientific notation (ép dạng text ="...")',
+          'Lọc danh sách @mention — ẩn thành viên không có tên hiển thị khỏi gợi ý nhắc đến',
+          'Chế độ nhân viên ổn định hơn: không tự kết nối Zalo ở workspace remote, boss sở hữu toàn bộ kết nối',
+          'Điều hướng Settings: sửa thứ tự dispatch sự kiện để tab và subtab mở đúng',
+          'Thanh nhãn local: nút đóng (X) và bố cục gọn hơn, mũi tên expand/collapse chuyển sang bên phải',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa click vào ảnh trong nhóm (SingleImageInGroup) không mở được trình xem ảnh',
+          'Sửa lỗi điều hướng từ Dashboard/WorkspaceSwitcher sang Settings tab sai (dispatch chưa đúng thứ tự)',
+        ],
+      },
+    ],
+  },
+  {
+    version: '26.4.6',
+    date: '06/2026',
+    type: 'minor',
+    highlights: [
+      '📊 Giới hạn gửi chiến dịch theo ngày — tự động dừng khi đạt giới hạn, hẹn giờ chạy tiếp ngày sau',
+      '🔧 Sửa lỗi chiến dịch gửi ảnh không thành công',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Giới hạn số liên hệ gửi/ngày cho chiến dịch CRM — cài đặt số lượng tối đa và giờ bắt đầu chạy ngày hôm sau, tự động dừng khi đạt giới hạn và tiếp tục vào ngày mới',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa lỗi chiến dịch CRM có nội dung ảnh (ảnh + text hoặc chỉ ảnh) không gửi được ảnh',
+        ],
+      },
+    ],
+  },
+  {
+    version: '26.4.5',
+    date: '06/2026',
+    type: 'minor',
+    highlights: [
+      '🔒 khoá màn hình — bảo vệ ứng dụng bằng mật khẩu, sinh trắc học và recovery key',
+      '☑️ Chọn nhiều tin nhắn — chọn và chuyển tiếp/sao chép nhiều tin cùng lúc',
+      '🖼️ Tự động sửa ảnh lỗi — ảnh hỏng được tải lại ngầm, không cần thao tác',
+      '📞 CRM nhập SĐT nhanh hơn — không cần chờ tra cứu, tự động xử lý khi gửi',
+    ],
+    changes: [
+      {
+        category: 'new',
+        items: [
+          'Khoá màn hình: đặt mật khẩu bảo vệ ứng dụng, phím tắt Ctrl+Shift+L để khoá nhanh, nút khoá trên thanh tiêu đề',
+          'Chọn nhiều tin nhắn: nhấn chuột phải → "Chọn tin nhắn" để chọn nhiều tin, sau đó sao chép hoặc chuyển tiếp hàng loạt',
+          'Chuyển tiếp nhiều tin cùng lúc: chọn nhiều tin nhắn và nhiều người nhận, gửi lần lượt tự động',
+          'Tự động phát hiện và sửa ảnh bị lỗi (ảnh trắng, 0 byte, nội dung HTML) khi mở cuộc trò chuyện',
+          'Hiển thị thông báo khi ẩn ứng dụng xuống tray — cho biết app vẫn chạy ngầm và nhận tin nhắn',
+        ],
+      },
+      {
+        category: 'improved',
+        items: [
+          'Chiến dịch CRM: nhập số điện thoại nhanh hơn — không cần chờ tra cứu Zalo, tự động tìm người dùng khi gửi chiến dịch',
+          'Chiến dịch CRM: gửi nhiều nội dung báo lỗi chính xác hơn — biết block nào gửi thành công, block nào thất bại',
+          'Cài đặt bảo mật: Cài mật khẩu, Recovery Key, Tắt khoá',
+          'Khi lưu ảnh về máy mà file bị lỗi, tự động tải lại từ url gốc để đảm bảo file lưu ra không bị hỏng',
+          'Nhấp vào thông báo desktop mở đúng cuộc trò chuyện ổn định hơn',
+          'Ngữ cảnh AI: tăng giới hạn lên 1000 tin nhắn thay vì 100',
+          'Workflow: hỗ trợ biến thời gian (HH:MM) trong điều kiện so sánh lớn hơn / nhỏ hơn',
+          'Workflow: import/template tự động cập nhật liên kết giữa các node',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa lỗi ảnh hiển thị trắng hoặc xoay mãi khi zoom do file ảnh bị hỏng',
+          'Sửa lỗi lưu ảnh về máy (Save As) không khắc phục được file đã lỗi',
+          'Sửa lỗi nhấp thông báo tin nhắn đôi khi không mở được cuộc trò chuyện',
+          'Sửa lỗi biến workflow không đúng khi dùng node AI trợ lý',
+          'Sửa lỗi Cloudflare Tunnel và ffmpeg không hoạt động trên bản cài đặt (asar)',
+        ],
+      },
+    ],
+  },
+  {
+    version: '26.4.4',
+    date: '06/2026',
+    type: 'minor',
+    highlights: [
+      '💬 Nâng cấp chuyển tiếp tin nhắn — hỗ trợ mọi loại, thêm soạn text kèm',
+      '📊 Chiến dịch CRM thông minh hơn — auto load thông tin từ tệp số điện thoại',
+      '🤖 Bổ sung Gemini 3.5 & DeepSeek V4, AI template trực quan hơn',
+    ],
+    changes: [
+      {
+        category: 'improved',
+        items: [
+          'Chuyển tiếp tin nhắn: hỗ trợ toàn bộ loại tin nhắn (text, ảnh, file, video) thay vì chỉ text như trước, thêm ô soạn text kèm khi chuyển tiếp',
+          'Chiến dịch CRM: tự động tra cứu và load thông tin khách hàng khi chọn tệp số điện thoại',
+          'Log lịch sử gửi tin CRM: bổ sung cột số điện thoại bên cạnh tên khách hàng',
+          'Thẻ AI trả lời: thiết kế lại giao diện cài đặt trực quan, dễ thao tác hơn',
+          'Cập nhật danh sách model AI: thêm Gemini 3.5 Flash và DeepSeek V4',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa lỗi chuyển tiếp tin nhắn không hoạt động với file, ảnh, video',
+          'Sửa lỗi không duyệt được thành viên nhóm Zalo',
+          'Sửa lỗi copy ảnh vào clipboard không hoạt động với ảnh remote',
+        ],
+      },
+    ],
+  },
+  {
     version: '26.4.3',
     date: '05/2026',
     type: 'minor',

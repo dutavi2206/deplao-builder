@@ -1,6 +1,6 @@
 {
   "name": "Deplao",
-  "version": "26.4.3",
+  "version": "26.4.7",
   "description": "Phần mềm desktop quản lý Zalo Đa tài khoản tích hợp CRM, ERP, POS, Workflow và AI Assistant giúp đội nhóm bán hàng, chăm sóc khách hàng và marketing trên Zalo vận hành tập trung trong một ứng dụng duy nhất.",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -102,7 +102,8 @@
     "asarUnpack": [
       "resources/icons/**",
       "node_modules/better-sqlite3/**",
-      "node_modules/cloudflared/**"
+      "node_modules/cloudflared/**",
+      "node_modules/ffmpeg-static/**"
     ],
     "afterPack": "./scripts/after-pack.js",
     "win": {

@@ -15,6 +15,8 @@ import useIsMobile from '@/hooks/useIsMobile';
 import { syncZaloGroups, MemberPlaceholder } from '@/lib/zaloGroupUtils';
 import { ChannelBadgeOverlay } from '../common/ChannelBadge';
 import type { Channel } from '@/../configs/channelConfig';
+import { extractUserProfile } from '../../../utils/profileUtils';
+import { refreshContactAlias } from '../../hooks/useZaloEvents';
 
 interface LabelData { id: number; text: string; color: string; emoji: string; conversations: string[]; textKey?: string; offset?: number; createTime?: number; }
 interface LocalLabelData {
@@ -906,6 +908,14 @@ export default function ConversationList() {
     } catch {}
   };
 
+  /** Kiểm tra contact chỉ có UID chưa có tên thật (do getUserInfo chập chờn) */
+  const isUidOnlyName = (c: { display_name?: string; alias?: string; contact_id: string } | undefined): boolean => {
+    if (!c) return true;
+    if (c.alias) return false;
+    const dn = c.display_name || '';
+    return !dn || dn === c.contact_id || /^\d{8,15}$/.test(dn);
+  };
+
   const handleSelect = async (contactId: string, threadType: number, overrideZaloId?: string) => {
     const zaloId = overrideZaloId ?? activeAccountId;
     setActiveThread(contactId, threadType);
@@ -952,6 +962,44 @@ export default function ConversationList() {
               setMessages(zaloId!, contactId, converted.reverse());
             }
           }).catch(() => {});
+      }
+    }
+
+    // Auto-fetch contact info nếu chỉ có UID chưa có tên thật (fire-and-forget)
+    if (threadType === 0) {
+      const contacts = useChatStore.getState().contacts[zaloId!] || [];
+      const contact = contacts.find(c => c.contact_id === contactId);
+      if (isUidOnlyName(contact)) {
+        const acc = overrideZaloId
+          ? useAccountStore.getState().accounts.find(a => a.zalo_id === zaloId)
+          : useAccountStore.getState().getActiveAccount();
+        if (acc && (acc.channel || 'zalo') === 'zalo') {
+          const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
+          ipc.zalo?.getUserInfo({ auth, userId: contactId })
+            .then((res: any) => {
+              const rawProfile = res?.response?.changed_profiles?.[contactId]
+                || res?.response?.data?.[contactId];
+              if (!rawProfile) return;
+              const { displayName, avatar, phone, gender, birthday, alias } = extractUserProfile(rawProfile);
+              if (!displayName) return;
+              const patch: any = { contact_id: contactId, display_name: displayName };
+              if (avatar) patch.avatar_url = avatar;
+              if (phone) patch.phone = phone;
+              if (alias) patch.alias = alias;
+              useChatStore.getState().updateContact(zaloId!, patch);
+              ipc.db?.updateContactProfile({
+                zaloId: zaloId!, contactId, displayName, avatarUrl: avatar, phone, gender, birthday,
+              }).catch(() => {});
+              if (alias) {
+                ipc.db?.setContactAlias({ zaloId: zaloId!, contactId, alias }).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      }
+      // Daily alias background refresh cho contact đã có tên thật
+      if (!isUidOnlyName(contact)) {
+        refreshContactAlias(zaloId!, contactId);
       }
     }
   };

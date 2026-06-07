@@ -25,12 +25,15 @@ export interface CRMCampaign {
   mixed_config: string;
   status: 'draft' | 'active' | 'paused' | 'done';
   delay_seconds: number;
+  daily_send_limit: number;    // 0 = không giới hạn
+  daily_start_time: string;    // "HH:MM" format
   created_at: number;
   updated_at: number;
   total_contacts: number;
   sent_count: number;
   pending_count: number;
   failed_count: number;
+  sent_today_count: number;    // computed: gửi trong ngày hôm nay
 }
 
 export interface CRMContact {
@@ -82,7 +85,7 @@ interface CRMStore {
   contactsLoading: boolean;
   campaignsLoading: boolean;
   // Queue status per account
-  queueStatus: Record<string, { running: boolean; tokens: number; maxTokens: number; lastSentAt: number }>;
+  queueStatus: Record<string, { running: boolean; tokens: number; maxTokens: number; lastSentAt: number; dailyPaused?: boolean }>;
   groupCount: number;
   requestCount: number;
 

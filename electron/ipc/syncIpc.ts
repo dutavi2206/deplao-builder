@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, BrowserWindow } from 'electron';
 import HttpClientService from '../../src/services/http/HttpClientService';
 import HttpConnectionManager from '../../src/services/http/HttpConnectionManager';
 import WorkspaceManager from '../../src/utils/WorkspaceManager';
@@ -23,6 +23,17 @@ function isRemoteMode(): boolean {
     return activeWs?.type === 'remote';
 }
 
+/** Notify the renderer that a sync operation completed so it can reload data. */
+function notifySyncComplete(workspaceId: string, syncType: 'full' | 'delta', syncTs?: number): void {
+    try {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('workspace:syncComplete', { workspaceId, syncType, syncTs });
+            Logger.log(`[syncIpc] Notified renderer: syncComplete (${syncType}) workspace=${workspaceId}`);
+        }
+    } catch {}
+}
+
 export function registerSyncIpc() {
     // ─── Full Sync (Employee requests from Boss) ────────────────────
     ipcMain.handle('sync:requestFullSync', async (_event, params: { zaloIds: string[] }) => {
@@ -45,6 +56,8 @@ export function registerSyncIpc() {
                         [String(appliedSyncTs), new Date(appliedSyncTs).toISOString()]
                     );
                 } catch {}
+                const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
+                if (activeWs) notifySyncComplete(activeWs.id, 'full', appliedSyncTs);
             }
             return result;
         } catch (err: any) {
@@ -82,6 +95,8 @@ export function registerSyncIpc() {
                         [String(appliedSyncTs), new Date(appliedSyncTs).toISOString()]
                     );
                 } catch {}
+                const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
+                if (activeWs) notifySyncComplete(activeWs.id, 'delta', appliedSyncTs);
             }
             return result;
         } catch (err: any) {

@@ -401,9 +401,10 @@ export default function MessageInput() {
   const filteredMentions = showMentionDropdown && isGroupThread
     ? groupMembers
         .filter(m =>
-          !mentionSearch ||
-          m.displayName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
-          m.userId.includes(mentionSearch)
+          m.displayName?.trim() &&   // ẩn thành viên không có tên (chỉ có UID)
+          (!mentionSearch ||
+            m.displayName.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+            m.userId.includes(mentionSearch))
         )
         .slice(0, 50)   // giới hạn 50 để tránh render quá nhiều (nhóm 5k thành viên)
     : [];
@@ -2090,20 +2091,8 @@ export default function MessageInput() {
 
       {/* Local label row — Pancake-style horizontal pills */}
       {showLocalLabels && localLabels.length > 0 && (
-        <div className="flex items-start gap-1.5 px-3 py-2 border-b border-gray-700/50 flex-wrap transition-all">
-          <div ref={labelRowRef} className="flex flex-wrap gap-1.5 transition-all" style={{ maxHeight: localLabelExpanded ? 'none' : 56, overflow: localLabelExpanded ? 'visible' : 'hidden',}}>
-            <button type="button" onClick={() => localLabelCanExpand && setLocalLabelExpanded(v => !v)} className="text-gray-500 flex-shrink-0" title={localLabelExpanded ? 'Thu gọn' : 'Xem tất cả'}>
-              {/* Icon đầu hàng: có thể đổi icon theo trạng thái */}
-              {localLabelExpanded ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-              ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6 15 12 9 18 15" />
-                  </svg>
-              )}
-            </button>
+        <div className="flex items-start gap-1.5 px-3 py-2 border-b border-gray-700/50 transition-all">
+          <div ref={labelRowRef} className="flex flex-wrap gap-1.5 flex-1 min-w-0 transition-all" style={{ maxHeight: localLabelExpanded ? 'none' : 56, overflow: localLabelExpanded ? 'visible' : 'hidden',}}>
             {localLabels.map(label => {
             const active = threadLocalLabelIds.has(label.id);
             const isToggling = togglingLocalLabelId === label.id;
@@ -2112,7 +2101,7 @@ export default function MessageInput() {
                 key={label.id}
                 onClick={() => handleToggleLocalLabel(label)}
                 disabled={isToggling}
-                className={`inline-flex items-center gap-1 px-3 text-[12px] py-1 rounded-full rounded-full text-[11px] font-medium whitespace-nowrap transition-all duration-150 border ${
+                className={`inline-flex items-center gap-1 px-3 text-[12px] py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-all duration-150 border ${
                   isToggling ? 'scale-95 opacity-60' : 'hover:scale-[1.03]'
                 } ${active ? 'shadow-sm' : ''}`}
                 style={active ? {
@@ -2139,8 +2128,30 @@ export default function MessageInput() {
               </button>
             );
           })}
+          </div>
+          {/* Right-side controls: expand/collapse arrow + close X */}
+          <div className="flex items-center gap-1 flex-shrink-0 ml-1">
+            {localLabelCanExpand && (
+              <button type="button" onClick={() => setLocalLabelExpanded(v => !v)} className="text-gray-500 hover:text-gray-300 flex-shrink-0" title={localLabelExpanded ? 'Thu gọn' : 'Xem tất cả'}>
+                {localLabelExpanded ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 15 12 9 18 15" />
+                    </svg>
+                )}
+              </button>
+            )}
+            <button type="button" onClick={() => { setShowLocalLabels(false); localStorage.setItem('show_local_labels', '0'); }} className="text-red-400 hover:text-red-300 flex-shrink-0" title="Đóng danh sách nhãn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
-      </div>
       )}
 
 

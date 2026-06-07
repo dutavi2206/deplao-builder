@@ -62,15 +62,6 @@ const CATALOG: Record<string, CatalogItem[]> = {
       ],
     },
     {
-      type: 'ipos', name: 'iPOS', priority: 'p0',
-      icon: '🍽️', color: 'bg-rose-500',
-      desc: 'POS nhà hàng / F&B Việt Nam. Tra cứu đơn, khách hàng, doanh thu.',
-      credentialFields: [
-        { key: 'apiKey',    label: 'API Key',   secret: true, placeholder: 'iPOS API Key / Token' },
-        { key: 'storeCode', label: 'Mã cửa hàng (store_code)', placeholder: 'vd: STORE01' },
-      ],
-    },
-    {
       type: 'nhanh', name: 'Nhanh.vn', priority: 'p0',
       icon: '⚡', color: 'bg-yellow-600',
       desc: 'Phần mềm bán hàng đa kênh Nhanh.vn. Quản lý đơn hàng, kho, khách hàng.',

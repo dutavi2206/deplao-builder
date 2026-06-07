@@ -37,7 +37,6 @@ export type NodeType =
   | 'kiotviet.lookupCustomer' | 'kiotviet.lookupOrder' | 'kiotviet.createOrder' | 'kiotviet.lookupProduct'
   | 'haravan.lookupCustomer' | 'haravan.lookupOrder' | 'haravan.createOrder' | 'haravan.lookupProduct'
   | 'sapo.lookupCustomer'    | 'sapo.lookupOrder'    | 'sapo.createOrder'    | 'sapo.lookupProduct'
-  | 'ipos.lookupCustomer'    | 'ipos.lookupOrder'    | 'ipos.createOrder'    | 'ipos.lookupProduct'
   | 'nhanh.lookupCustomer'   | 'nhanh.lookupOrder'   | 'nhanh.createOrder'   | 'nhanh.lookupProduct'
   | 'pancake.lookupCustomer' | 'pancake.lookupOrder' | 'pancake.createOrder' | 'pancake.lookupProduct'
   | 'payment.getTransactions'
@@ -527,8 +526,14 @@ class WorkflowEngineService {
       let renderedConfig: Record<string, any> = {};
       try {
         renderedConfig = this.renderConfig(node.config, context);
+        if (node.type === 'zalo.sendMessage') {
+          Logger.info(`[WorkflowEngine] sendMessage BEFORE: raw="${(node.config.message || '').substring(0, 300)}" → rendered="${(renderedConfig.message || '').substring(0, 300)}"`);
+        }
         const output = await this.executeNode(node, renderedConfig, context, wf);
         context.nodes[nodeId] = { output };
+        if (node.type === 'ai.generateText') {
+          Logger.info(`[WorkflowEngine] AI chat output stored: keys=${output ? Object.keys(output).join(',') : 'null'}, result="${typeof output === 'object' && output ? (output.result || '').substring(0, 200) : String(output).substring(0, 200)}"`);
+        }
 
         // If this is an IF node, mark the wrong branch as skipped
         if (node.type === 'logic.if') {
@@ -731,6 +736,7 @@ class WorkflowEngineService {
       case 'zalo.sendMessage': {
         const api = this.getApi(ctx.pageId);
         const threadType = Number(cfg.threadType) === 1 ? 1 : 0;   // guard NaN → 0
+        Logger.info(`[WorkflowEngine] sendMessage: message="${(cfg.message || '').substring(0, 300)}", threadId=${cfg.threadId}, threadType=${threadType}, isEmpty=${!cfg.message?.trim()}`);
 
         // ─── Structured AI response handling ─────────────────────────────
         // Detect AI structured JSON: [{type:"text",content:"..."}, {type:"image",content:["url",...]}]
@@ -761,7 +767,7 @@ class WorkflowEngineService {
                   const tempPath = await this.downloadUrlToTempFile(String(url));
                   try {
                     const res = await api.sendMessage({ msg: '', attachments: [tempPath] }, cfg.threadId, threadType);
-                    lastMsgId = (res as any)?.message?.msgId || lastMsgId;
+                    lastMsgId = (res as any)?.attachment?.[0]?.msgId || (res as any)?.message?.msgId || lastMsgId;
                   } finally {
                     try { fs.unlinkSync(tempPath); } catch {}
                   }
@@ -806,13 +812,17 @@ class WorkflowEngineService {
         const api = this.getApi(ctx.pageId);
         const threadType = Number(cfg.threadType) === 1 ? 1 : 0;
         const result = await api.sendMessage({ msg: cfg.message || '', attachments: [cfg.filePath] }, cfg.threadId, threadType);
+<<<<<<< HEAD
         return { msgId: (result as any)?.message?.msgId || '', success: true };
+=======
+        return { msgId: (result as any)?.attachment?.[0]?.msgId || '', success: true };
+>>>>>>> origin/main
       }
 
       case 'zalo.sendFile': {
         const api = this.getApi(ctx.pageId);
         const threadType = Number(cfg.threadType) === 1 ? 1 : 0;
-        await api.sendFile(cfg.filePath, cfg.threadId, threadType);
+        await api.sendMessage({ msg: '', attachments: [cfg.filePath] }, cfg.threadId, threadType);
         return { success: true };
       }
 
@@ -993,8 +1003,8 @@ class WorkflowEngineService {
           case 'not_contains': result = !left.includes(right); break;
           case 'starts_with':  result = left.startsWith(right); break;
           case 'ends_with':    result = left.endsWith(right); break;
-          case 'greater_than': result = Number(left) > Number(right); break;
-          case 'less_than':    result = Number(left) < Number(right); break;
+          case 'greater_than': result = this.compareValues(left, right) > 0; break;
+          case 'less_than':    result = this.compareValues(left, right) < 0; break;
           case 'is_empty':     result = !left || left.trim() === ''; break;
           case 'not_empty':    result = !!left && left.trim() !== ''; break;
           case 'regex':
@@ -1038,8 +1048,8 @@ class WorkflowEngineService {
           case 'not_contains': stop = !left.includes(right); break;
           case 'starts_with':  stop = left.startsWith(right); break;
           case 'ends_with':    stop = left.endsWith(right); break;
-          case 'greater_than': stop = Number(left) > Number(right); break;
-          case 'less_than':    stop = Number(left) < Number(right); break;
+          case 'greater_than': stop = this.compareValues(left, right) > 0; break;
+          case 'less_than':    stop = this.compareValues(left, right) < 0; break;
           case 'is_empty':     stop = !left || left.trim() === ''; break;
           case 'not_empty':    stop = !!left && left.trim() !== ''; break;
           case 'regex':
@@ -1185,7 +1195,7 @@ class WorkflowEngineService {
               try {
                 let history: any[] = typeof cfg.chatHistory === 'string' && cfg.chatHistory.trim()
                   ? JSON.parse(cfg.chatHistory) : (Array.isArray(cfg.chatHistory) ? cfg.chatHistory : []);
-                const maxMsgs = Number(cfg.maxHistoryMessages ?? 10);
+            const maxMsgs = Number(cfg.maxHistoryMessages ?? 20);
                 if (history.length > maxMsgs) history = history.slice(-maxMsgs);
                 for (const msg of history) {
                   if (msg?.role && msg?.content) {
@@ -1200,6 +1210,7 @@ class WorkflowEngineService {
 
             chatMsgs.push({ role: 'user', content: cfg.prompt });
             const result = await AIAssistantService.getInstance().chatForWorkflow(cfg.assistantId, chatMsgs);
+            Logger.info(`[WorkflowEngine] AI assistant response: success=${!!result.result}, length=${result.result?.length || 0}, preview="${(result.result || '').substring(0, 200)}", tokens=${result.totalTokens}`);
             return { result: result.result, totalTokens: result.totalTokens, model: 'assistant' };
           } catch (e: any) {
             throw new Error(`Trợ lý AI lỗi: ${e.message}`);
@@ -1218,7 +1229,7 @@ class WorkflowEngineService {
             } else if (Array.isArray(cfg.chatHistory)) {
               history = cfg.chatHistory;
             }
-            const maxMsgs = Number(cfg.maxHistoryMessages ?? 10);
+            const maxMsgs = Number(cfg.maxHistoryMessages ?? 20);
             // Trim to maxMsgs (most recent)
             if (history.length > maxMsgs) history = history.slice(-maxMsgs);
             for (const msg of history) {
@@ -1246,7 +1257,8 @@ class WorkflowEngineService {
         messages.push({ role: 'user', content: cfg.prompt });
 
         const platform = cfg.platform || 'openai';
-        const model = cfg.model || 'gpt-5.4-mini';
+        const rawModel = cfg.model || 'gpt-5.4-mini';
+        const model = this.normalizeModelName(rawModel);
         const maxTokens = Number(cfg.maxTokens || 500);
         const temperature = Number(cfg.temperature ?? 0.7);
 
@@ -1346,7 +1358,7 @@ class WorkflowEngineService {
         }
 
         const platform = cfg.platform || 'openai';
-        const model = cfg.model || 'gpt-5.4-mini';
+        const model = this.normalizeModelName(cfg.model || 'gpt-5.4-mini');
         const classifyMessages = [
           { role: 'system' as const, content: systemMsg },
           { role: 'user' as const, content: cfg.input },
@@ -1585,29 +1597,6 @@ class WorkflowEngineService {
         return { products: result.products || [], found: result.found };
       }
 
-      // ── P0: iPOS ─────────────────────────────────────────────────────────
-      case 'ipos.lookupCustomer': {
-        const result = await IntegrationRegistry.executeActionByType('ipos', 'lookupCustomer', { phone: cfg.phone });
-        return { customers: result.customers || [], found: result.found, firstCustomer: result.firstCustomer || null };
-      }
-      case 'ipos.lookupOrder': {
-        const result = await IntegrationRegistry.executeActionByType('ipos', 'lookupOrder', { phone: cfg.phone, orderId: cfg.orderId });
-        const orders: any[] = result.orders || (result.order ? [result.order] : []);
-        return { orders, order: result.order || orders[0] || null, found: orders.length > 0 };
-      }
-      case 'ipos.createOrder': {
-        let orderObj: any = {};
-        try { orderObj = typeof cfg.order === 'string' ? JSON.parse(cfg.order) : cfg.order; } catch {}
-        const result = await IntegrationRegistry.executeActionByType('ipos', 'createOrder', { order: orderObj });
-        return { order: result.order || result, success: true };
-      }
-      case 'ipos.lookupProduct': {
-        const result = await IntegrationRegistry.executeActionByType('ipos', 'lookupProduct', {
-          keyword: cfg.keyword, limit: Number(cfg.limit || 10),
-        });
-        return { products: result.products || [], found: result.found };
-      }
-
       // ── P0: Nhanh.vn ─────────────────────────────────────────────────────
       case 'nhanh.lookupCustomer': {
         const result = await IntegrationRegistry.executeActionByType('nhanh', 'lookupCustomer', { phone: cfg.phone });
@@ -1838,7 +1827,7 @@ class WorkflowEngineService {
   }
 
   private renderTemplate(template: string, ctx: ExecutionContext): string {
-    return template.replace(/\{\{[\s]*([\w$.[\]]+)[\s]*}}/g, (_, expr) => {
+    return template.replace(/\{\{\s*([^\s{}]+)\s*\}\}/gu, (_, expr) => {
       try {
         if (expr.startsWith('$trigger.'))   return String(ctx.trigger?.[expr.slice(9)] ?? '');
         if (expr.startsWith('$var.'))       return String(ctx.variables?.[expr.slice(5)] ?? '');
@@ -1856,8 +1845,38 @@ class WorkflowEngineService {
             const nodeDef = ctx._wfNodes?.find(n => n.id === nid);
             const labelOrId = nodeDef?.label || nid;
             if (nid === nodeRef || labelOrId === nodeRef) {
-              return String(this.getNestedValue(ndata.output, field) ?? '');
+              // $node.X.output → return the whole output object (not getNestedValue on it)
+              if (field === 'output') {
+                const out = ndata.output;
+                const val = typeof out === 'string' ? out : (out?.result ?? out?.text ?? out?.message ?? JSON.stringify(out ?? ''));
+                Logger.info(`[WorkflowEngine] $node.${nodeRef}.output → matched by ${nid === nodeRef ? 'id' : 'label'}("${labelOrId}"), value="${String(val).substring(0, 200)}"`);
+                return String(val);
+              }
+              const val = this.getNestedValue(ndata.output, field);
+              Logger.info(`[WorkflowEngine] $node.${nodeRef}.${field} → matched by ${nid === nodeRef ? 'id' : 'label'}("${labelOrId}"), value="${String(val ?? '').substring(0, 200)}"`);
+              return String(val ?? '');
             }
+          }
+          // Fallback: match "n4" → 4th node by array order (legacy template IDs like n1,n2,n3...)
+          const idxMatch = nodeRef.match(/^n(\d+)$/);
+          if (idxMatch && ctx._wfNodes) {
+            const targetIdx = parseInt(idxMatch[1]) - 1;
+            if (targetIdx >= 0 && targetIdx < ctx._wfNodes.length) {
+              const targetNodeId = ctx._wfNodes[targetIdx].id;
+              const ndata = ctx.nodes[targetNodeId];
+              if (ndata) {
+                let val: any;
+                if (field === 'output') {
+                  const out = ndata.output;
+                  val = typeof out === 'string' ? out : (out?.result ?? out?.text ?? out?.message ?? JSON.stringify(out ?? ''));
+                } else {
+                  val = this.getNestedValue(ndata.output, field);
+                }
+                Logger.info(`[WorkflowEngine] $node.${nodeRef}.${field} → fallback n${targetIdx + 1} → node "${ctx._wfNodes[targetIdx].label}" (${targetNodeId}), value="${String(val ?? '').substring(0, 200)}"`);
+                return String(val ?? '');
+              }
+            }
+            Logger.warn(`[WorkflowEngine] $node.${nodeRef}.${field} → fallback n${targetIdx + 1} FAILED — no output for node at index ${targetIdx}. Available nodes: ${ctx._wfNodes.map((n, i) => `n${i+1}=${n.label}`).join(', ')}`);
           }
         }
       } catch {}
@@ -1878,6 +1897,29 @@ class WorkflowEngineService {
     }, obj);
   }
 
+  /**
+   * Compare two values for greater_than / less_than.
+   * Supports numbers and time strings (HH:MM or HH:MM:SS).
+   * Returns positive if left > right, negative if left < right, 0 if equal.
+   */
+  private compareValues(left: string, right: string): number {
+    // Try numeric comparison first
+    const ln = Number(left), rn = Number(right);
+    if (!isNaN(ln) && !isNaN(rn)) return ln - rn;
+
+    // Try time comparison: HH:MM or HH:MM:SS
+    const parseTime = (s: string): number | null => {
+      const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      if (!m) return null;
+      return parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + (parseInt(m[3] || '0'));
+    };
+    const lt = parseTime(left), rt = parseTime(right);
+    if (lt !== null && rt !== null) return lt - rt;
+
+    // Fallback: string comparison (lexicographic)
+    return left.localeCompare(right, 'vi');
+  }
+
   /** Get the OpenAI-compatible chat/completions URL for a given platform */
   private getOpenAICompatibleUrl(platform: string): string {
     switch (platform) {
@@ -1888,6 +1930,20 @@ class WorkflowEngineService {
       default:         return 'https://api.openai.com/v1/chat/completions';
     }
   }
+
+  /** Normalize legacy/incorrect model names to current API model IDs */
+  private normalizeModelName(model: string): string {
+    const aliases: Record<string, string> = {
+      'deepseek-chat-v3.2':    'deepseek-v4-flash',
+      'deepseek-chat-v3.1':    'deepseek-v4-flash',
+      'deepseek-reasoner-r1.5':'deepseek-v4-pro',
+      'gemini-3.1-pro':        'gemini-3.1-pro-preview',
+      'gemini-3.1-flash':      'gemini-3.5-flash',
+      'gemini-3.0-flash':      'gemini-3-flash-preview',
+      'gemini-3.0-flash-lite': 'gemini-3-flash-preview',
+    };
+    return aliases[model] ?? model;
+}
 
   /** Convert OpenAI-format messages to Google Gemini format */
   private openaiMessagesToGemini(messages: Array<{ role: string; content: string }>): any[] {

@@ -12,7 +12,6 @@ import { GHNAdapter } from './adapters/GHNAdapter';
 import { GHTKAdapter } from './adapters/GHTKAdapter';
 import { HaravanAdapter } from './adapters/HaravanAdapter';
 import { SapoAdapter } from './adapters/SapoAdapter';
-import { IPosAdapter } from './adapters/IPosAdapter';
 import { NhanhAdapter } from './adapters/NhanhAdapter';
 import { PancakeAdapter } from './adapters/PancakeAdapter';
 
@@ -34,7 +33,6 @@ function createAdapter(config: IntegrationConfig): IntegrationAdapter {
     case 'ghtk':     return new GHTKAdapter(config);
     case 'haravan':  return new HaravanAdapter(config);
     case 'sapo':     return new SapoAdapter(config);
-    case 'ipos':     return new IPosAdapter(config);
     case 'nhanh':    return new NhanhAdapter(config);
     case 'pancake':  return new PancakeAdapter(config);
     default:

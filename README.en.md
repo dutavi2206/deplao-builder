@@ -13,7 +13,7 @@
 
 > A multi-account Zalo desktop app with integrated CRM, ERP, POS, Workflow automation and AI Assistant — helping sales, customer care teams and marketing operate centrally in one single application.
 
-[![Version](https://img.shields.io/badge/version-26.4.3-22c55e)](#)
+[![Version](https://img.shields.io/badge/version-26.4.7-22c55e)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3b82f6)](#-runtime-requirements)
 [![Electron](https://img.shields.io/badge/Electron-41-47848f?logo=electron&logoColor=white)](#)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](#)
@@ -24,23 +24,37 @@
 [![License](https://img.shields.io/badge/license-ISC-f59e0b)](#)
 [![Support](https://img.shields.io/badge/support-GitHub_Issues-0ea5e9)](https://github.com/babyvibe/deplao-builder/issues)
 
-### ⬇️ Quick Download
+## ⬇️ Download
 
-<p>
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.4.3.exe">
-    <img src="https://img.shields.io/badge/%F0%9F%AA%9F_Windows-Deplao--Setup--26.4.3.exe-0078d4?style=for-the-badge" alt="Download Windows" />
-  </a>
-  &nbsp;
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.3-arm64.dmg">
-    <img src="https://img.shields.io/badge/%F0%9F%8D%8E_macOS_M1%2B-Deplao--26.4.3--arm64.dmg-000000?style=for-the-badge" alt="Download macOS Apple Silicon" />
-  </a>
-  &nbsp;
-  <a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.3.dmg">
-    <img src="https://img.shields.io/badge/%F0%9F%8D%8E_macOS_Intel-Deplao--26.4.3.dmg-000000?style=for-the-badge" alt="Download macOS Intel" />
-  </a>
+<table>
+<tr>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.4.7.exe">
+<img src="https://img.shields.io/badge/🪟_Windows-v26.4.7-0078d4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows" />
+</a>
+<br>
+<sub>Deplao-Setup-26.4.7.exe</sub>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.7-arm64.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_M1+-v26.4.7-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Apple Silicon" />
+</a>
+<br>
+<sub>Deplao-26.4.7-arm64.dmg</sub>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.7.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_Intel-v26.4.7-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Intel" />
+</a>
+<br>
+<sub>Deplao-26.4.7.dmg</sub>
+</td>
+</tr>
+</table>
+
+<p align="center">
+👉 <strong><a href="https://github.com/babyvibe/deplao-builder/releases">View all releases</a></strong>
 </p>
-
-👉 All releases: https://github.com/babyvibe/deplao-builder/releases
 
 <details>
 <summary>⚠️ Security warning on first launch (blocked by Windows / macOS)</summary>

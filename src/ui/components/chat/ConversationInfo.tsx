@@ -58,6 +58,7 @@ function UserConversationInfo() {
   const [mutualGroupsLoading, setMutualGroupsLoading] = useState(false);
   // isFriendDB: check thực từ bảng friends trong DB (đáng tin hơn contact.is_friend)
   const [isFriendDB, setIsFriendDB] = useState<boolean | null>(null);
+  const [aliasRefreshing, setAliasRefreshing] = useState(false);
 
   const contactList = activeAccountId ? (contacts[activeAccountId] || []) : [];
   const contact = contactList.find((c) => c.contact_id === activeThreadId);
@@ -248,6 +249,40 @@ function UserConversationInfo() {
     }
   };
 
+  /** Reload icon: chỉ refresh alias (biệt danh) từ API */
+  const handleRefreshAlias = async () => {
+    if (!channelCap.supportsAlias) return;
+    const auth = getAuth();
+    if (!auth || !activeThreadId || !activeAccountId) return;
+    setAliasRefreshing(true);
+    try {
+      const res = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
+      const rawProfile = res?.response?.changed_profiles?.[activeThreadId]
+        || res?.response?.data?.[activeThreadId];
+      if (rawProfile) {
+        const { displayName: newName, avatar: newAvatar, phone: newPhone, gender, birthday, alias: newAlias } = extractUserProfile(rawProfile);
+        const patch: any = { contact_id: activeThreadId };
+        if (newName) patch.display_name = newName;
+        if (newAvatar) patch.avatar_url = newAvatar;
+        if (newPhone) patch.phone = newPhone;
+        if (newAlias) patch.alias = newAlias;
+        if (Object.keys(patch).length > 1) {
+          updateContact(activeAccountId, patch);
+          await ipc.db?.updateContactProfile({
+            zaloId: activeAccountId, contactId: activeThreadId,
+            displayName: newName, avatarUrl: newAvatar, phone: newPhone,
+            gender, birthday,
+          });
+          if (newAlias) {
+            ipc.db?.setContactAlias({ zaloId: activeAccountId, contactId: activeThreadId, alias: newAlias }).catch(() => {});
+          }
+        }
+      }
+    } catch {} finally {
+      setAliasRefreshing(false);
+    }
+  };
+
   // Load mutual groups khi mở sub-panel
   const handleOpenMutualGroups = () => {
     if (!channelCap.supportsMutualGroups) return;
@@ -398,6 +433,20 @@ function UserConversationInfo() {
             onMouseEnter={() => channelCap.supportsAlias && setHovering(true)} onMouseLeave={() => setHovering(false)}
             onClick={() => { if (!channelCap.supportsAlias) return; setAliasValue(contact?.alias || ''); setEditingAlias(true); }}>
             <p className="text-white font-semibold text-base text-center">{displayName}</p>
+            {channelCap.supportsAlias && (
+              <button
+                title="Tải lại biệt danh"
+                onClick={(e) => { e.stopPropagation(); handleRefreshAlias(); }}
+                className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                disabled={aliasRefreshing}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  className={aliasRefreshing ? 'animate-spin' : ''}>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+              </button>
+            )}
             {channelCap.supportsAlias && (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
               className={`text-gray-300 transition-opacity flex-shrink-0 ${hovering ? 'opacity-100' : 'opacity-0'}`}>

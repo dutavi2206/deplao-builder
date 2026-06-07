@@ -2,6 +2,9 @@ import DatabaseService from '../database/DatabaseService';
 import ConnectionManager from '../../utils/ConnectionManager';
 import EventBroadcaster from '../event/EventBroadcaster';
 import Logger from '../../utils/Logger';
+import * as fs from 'fs';
+import * as path from 'path';
+import imageSize from 'image-size';
 
 /**
  * CRMQueueService — chạy trong main process
@@ -16,6 +19,8 @@ class CRMQueueService {
     // Token bucket: max 60/giờ — refill 1 token mỗi 60s
     private tokens: Map<string, number> = new Map();
     private lastRefillAt: Map<string, number> = new Map();
+    // Daily limit tracking: campaignId → paused due to daily limit
+    private dailyPausedCampaigns: Map<number, boolean> = new Map();
 
     public readonly MAX_TOKENS = 60;
     private readonly REFILL_INTERVAL_MS = 60 * 1000;  // 1 phút / token → 60/giờ
@@ -69,12 +74,14 @@ class CRMQueueService {
         if (!hasActive) this.stopForAccount(zaloId);
     }
 
-    public getStatus(zaloId: string): { running: boolean; tokens: number; maxTokens: number; lastSentAt: number } {
+    public getStatus(zaloId: string): { running: boolean; tokens: number; maxTokens: number; lastSentAt: number; dailyPaused: boolean } {
+        const isDailyPaused = Array.from(this.dailyPausedCampaigns.values()).some(v => v);
         return {
             running: this.timers.has(zaloId),
             tokens: this.tokens.get(zaloId) ?? this.MAX_TOKENS,
             maxTokens: this.MAX_TOKENS,
             lastSentAt: this.lastSentAt.get(zaloId) ?? 0,
+            dailyPaused: isDailyPaused,
         };
     }
 
@@ -124,6 +131,32 @@ class CRMQueueService {
             return;
         }
 
+        // ── Daily send limit check ──────────────────────────────────────
+        const campaignData = db.getCRMCampaign(item.campaign_id);
+        if (campaignData && campaignData.daily_send_limit && campaignData.daily_send_limit > 0) {
+            const dailyCount = db.getDailySentCountForCampaign(item.campaign_id);
+            if (dailyCount >= campaignData.daily_send_limit) {
+                // Daily limit reached — pause this campaign for today
+                this.dailyPausedCampaigns.set(item.campaign_id, true);
+                Logger.log(`[CRMQueue] Campaign ${item.campaign_id} daily limit reached: ${dailyCount}/${campaignData.daily_send_limit}`);
+                this.broadcastStatus(zaloId, 'daily_limit_reached');
+                return;
+            }
+            // If some contacts sent today but not yet past daily_start_time, wait
+            // First day exemption: dailyCount === 0 → run immediately
+            if (dailyCount > 0) {
+                const now = new Date();
+                const [hh, mm] = (campaignData.daily_start_time || '08:00').split(':').map(Number);
+                const todayStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh || 8, mm || 0, 0);
+                if (now < todayStartTime) {
+                    Logger.log(`[CRMQueue] Campaign ${item.campaign_id}: before daily start time ${campaignData.daily_start_time}`);
+                    this.broadcastStatus(zaloId, 'waiting_for_start_time');
+                    return;
+                }
+            }
+            this.dailyPausedCampaigns.delete(item.campaign_id);
+        }
+
         // Check delay (campaign.delay_seconds + jitter ±10s)
         const delayMs = Math.max(this.MIN_DELAY_MS, (item.delay_seconds || 60) * 1000);
         const jitter = (Math.random() - 0.5) * 20000; // ±10s
@@ -140,11 +173,62 @@ class CRMQueueService {
         this.isProcessing.set(zaloId, true);
         db.updateCampaignContactStatus(item.id!, 'sending');
 
+        // ── Phone resolution at send time ────────────────────────────────────
+        // If contact_id is a phone placeholder (from by_phone import), resolve now
+        let effectiveContactId = item.contact_id;
+        let effectiveDisplayName = item.display_name || '';
+        if (item.contact_id.startsWith('phone:')) {
+            const phone = item.contact_id.slice(6); // strip "phone:" prefix
+            Logger.log(`[CRMQueue] Resolving phone ${phone} at send time...`);
+            const resolved = await this.resolvePhoneContact(phone, conn.api);
+            if (!resolved) {
+                Logger.warn(`[CRMQueue] Phone ${phone} not found on Zalo, marking failed`);
+                db.updateCampaignContactStatus(item.id!, 'failed', 'Không tìm thấy SĐT trên Zalo');
+                db.save();
+                this.broadcastProgress(zaloId, item.campaign_id, item.contact_id, 'failed', 'Không tìm thấy SĐT trên Zalo');
+                this.isProcessing.set(zaloId, false);
+                return;
+            }
+            effectiveContactId = resolved.uid;
+            effectiveDisplayName = resolved.name;
+            // Update the DB record so we don't resolve again on retry
+            try {
+                db.updateCampaignContactId(item.id!, resolved.uid, resolved.name);
+            } catch { /* non-critical */ }
+            Logger.log(`[CRMQueue] Phone ${phone} → UID ${resolved.uid} (${resolved.name})`);
+        }
+
+        // ── UID resolution at send time ────────────────────────────────────────
+        // If display_name is empty and contact_id looks like a numeric UID (from by_uid import),
+        // fetch user info via API to populate the display name
+        if (!effectiveDisplayName && /^\d{5,}$/.test(effectiveContactId)) {
+            Logger.log(`[CRMQueue] Resolving UID ${effectiveContactId} via getUserInfo...`);
+            try {
+                const infoRes = await (conn.api as any).getUserInfo(effectiveContactId);
+                const profile = infoRes?.response?.changed_profiles?.[effectiveContactId]
+                    ?? infoRes?.changed_profiles?.[effectiveContactId];
+                if (profile) {
+                    effectiveDisplayName = profile.displayName || profile.zaloName || profile.name || '';
+                }
+                if (effectiveDisplayName) {
+                    // Update DB so we don't resolve again on retry
+                    try {
+                        db.updateCampaignContactId(item.id!, effectiveContactId, effectiveDisplayName);
+                    } catch { /* non-critical */ }
+                    Logger.log(`[CRMQueue] UID ${effectiveContactId} → "${effectiveDisplayName}"`);
+                } else {
+                    Logger.warn(`[CRMQueue] UID ${effectiveContactId}: getUserInfo returned no name`);
+                }
+            } catch (uidErr: any) {
+                Logger.warn(`[CRMQueue] UID ${effectiveContactId} getUserInfo failed: ${uidErr.message}`);
+            }
+        }
+
         // Substitute template variables in a message string
         const substitute = (tpl: string) =>
             (tpl || '')
-                .replace(/\{name\}/g, item.display_name || item.contact_id)
-                .replace(/\{userId\}/g, item.contact_id);
+                .replace(/\{name\}/g, effectiveDisplayName || item.contact_id)
+                .replace(/\{userId\}/g, effectiveContactId);
 
         const campaignType: string = (item as any).campaign_type || 'message';
         const isGroup: boolean = (item as any).contact_type === 'group';
@@ -179,47 +263,106 @@ class CRMQueueService {
             blocksToSend = allBlocks;
         }
 
-        // Helper: send one block (text + images) to a target
-        const sendBlock = async (block: ContentBlock, threadId: string, threadType: number): Promise<void> => {
+        // Helper: send one block (text + images) to a target, returns collected API responses
+        const sendBlock = async (block: ContentBlock, threadId: string, threadType: number): Promise<any[]> => {
+            const responses: any[] = [];
             const text = substitute(block.text || '');
             if (text.trim()) {
-                await (conn.api as any).sendMessage({ msg: text }, threadId, threadType);
+                const resp = await (conn.api as any).sendMessage({ msg: text }, threadId, threadType);
+                responses.push(resp);
             }
             const imgs = (block.images || []).filter(Boolean);
             if (imgs.length > 0) {
                 await new Promise(r => setTimeout(r, 500));
-                // zca-js không có sendImage/sendImages — dùng sendMessage với attachments
-                await (conn.api as any).sendMessage({ msg: '', attachments: imgs }, threadId, threadType);
+                // Build attachments — read each image file from disk
+                const attachments: any[] = [];
+                for (const filePath of imgs) {
+                    try {
+                        const buffer = fs.readFileSync(filePath);
+                        const baseName = path.basename(filePath);
+                        const ext = path.extname(baseName) || '.jpg';
+                        const safeFilename = (path.extname(baseName) ? baseName : `${baseName}${ext}`) as `${string}.${string}`;
+                        let width = 0, height = 0;
+                        try { const dim = imageSize(buffer); width = dim.width ?? 0; height = dim.height ?? 0; } catch {}
+                        attachments.push({ data: buffer, filename: safeFilename, metadata: { totalSize: buffer.length, width, height } });
+                    } catch (readErr: any) {
+                        Logger.error(`[CRMQueue] Image read failed: ${filePath} → ${readErr.message}`);
+                        throw new Error(`Không đọc được ảnh: ${filePath} — ${readErr.message}`);
+                    }
+                }
+                if (attachments.length > 0) {
+                    const resp = await (conn.api as any).sendMessage({ msg: '', attachments }, threadId, threadType);
+                    responses.push(resp);
+                }
             }
+            return responses;
         };
 
         // Legacy single-message string for log display
-        const message = blocksToSend.length > 0 ? substitute(blocksToSend[0].text || '') : '';
+        // Include image indicator when block has images but no text
+        const firstBlock = blocksToSend[0];
+        const firstBlockText = firstBlock ? substitute(firstBlock.text || '') : '';
+        const firstBlockImgCount = firstBlock?.images?.filter(Boolean).length || 0;
+        const message = firstBlockText.trim()
+          ? firstBlockText + (firstBlockImgCount > 0 ? ` + ${firstBlockImgCount} ảnh` : '')
+          : firstBlockImgCount > 0
+            ? `[${firstBlockImgCount} ảnh]`
+            : '(trống)';
+
+        // Helper: describe block content for log (text + image count)
+        const describeBlock = (block: ContentBlock): string => {
+            const txt = substitute(block.text || '').trim();
+            const imgCount = (block.images || []).filter(Boolean).length;
+            if (txt && imgCount > 0) return `${txt} + ${imgCount} ảnh`;
+            if (txt) return txt;
+            if (imgCount > 0) return `[${imgCount} ảnh]`;
+            return '(trống)';
+        };
 
         // Common log base fields
         const logBase = {
             owner_zalo_id: zaloId,
-            contact_id: item.contact_id,
-            display_name: item.display_name || '',
+            contact_id: effectiveContactId,
+            display_name: effectiveDisplayName || '',
             phone: (item as any).phone || '',
             contact_type: isGroup ? 'group' : 'user',
             campaign_id: item.campaign_id,
             sent_at: Date.now(),
         };
 
+        // Helper: send multiple blocks with per-block error catching and 1s delay
+        const sendBlocks = async (blocks: ContentBlock[], threadId: string, threadType: number): Promise<{ sent: number; errors: string[]; responses: any[] }> => {
+            let sent = 0;
+            const errors: string[] = [];
+            const responses: any[] = [];
+            for (let bi = 0; bi < blocks.length; bi++) {
+                if (bi > 0) await new Promise(r => setTimeout(r, 1000));
+                try {
+                    const resps = await sendBlock(blocks[bi], threadId, threadType);
+                    responses.push(...resps);
+                    sent++;
+                } catch (blockErr: any) {
+                    const errMsg = blockErr?.message || String(blockErr);
+                    errors.push(errMsg);
+                    Logger.error(`[CRMQueue] Block ${bi + 1}/${blocks.length} failed for ${threadId}: ${errMsg}`);
+                }
+            }
+            return { sent, errors, responses };
+        };
+
         try {
             if (isGroup) {
                 // ── Gửi vào nhóm ─────────────────────────────────────────────────
                 const threadType = 1;
-                for (let bi = 0; bi < blocksToSend.length; bi++) {
-                    if (bi > 0) await new Promise(r => setTimeout(r, 1500));
-                    await sendBlock(blocksToSend[bi], item.contact_id, threadType);
-                }
-                const logMsg = `[Nhóm] ${sendMode === 'all' ? `${blocksToSend.length} nội dung` : message}`;
-                db.updateCampaignContactStatus(item.id!, 'sent');
-                db.saveSendLog({ ...logBase, message: logMsg, status: 'sent', send_type: 'message',
-                    data_request: JSON.stringify({ type: 'sendMessage', threadId: item.contact_id, threadType, blocks: blocksToSend.length }),
-                    data_response: '' });
+                const result = await sendBlocks(blocksToSend, effectiveContactId, threadType);
+                const logMsg = sendMode === 'all'
+                    ? `[Nhóm] ${result.sent}/${blocksToSend.length} nội dung: ${blocksToSend.map(describeBlock).join(' | ')}`
+                    : `[Nhóm] ${message}`;
+                db.updateCampaignContactStatus(item.id!, result.errors.length > 0 ? 'failed' : 'sent', result.errors.join('; ') || undefined);
+                db.saveSendLog({ ...logBase, message: logMsg, status: result.errors.length > 0 ? 'failed' : 'sent',
+                    error: result.errors.join('; ') || '', send_type: 'message',
+                    data_request: JSON.stringify({ type: 'sendMessage', threadId: effectiveContactId, threadType, blocks: blocksToSend.length, sent: result.sent }),
+                    data_response: result.responses.length > 0 ? JSON.stringify(result.responses.length === 1 ? result.responses[0] : result.responses) : '' });
 
             } else if (campaignType === 'mixed' && mixedActions.length > 0) {
                 // ── Hỗn hợp (mới) ────────────────────────────────────────────────
@@ -228,42 +371,46 @@ class CRMQueueService {
                     try {
                         if (action === 'message') {
                             const threadType = 0;
-                            for (let bi = 0; bi < blocksToSend.length; bi++) {
-                                if (bi > 0) await new Promise(r => setTimeout(r, 1500));
-                                await sendBlock(blocksToSend[bi], item.contact_id, threadType);
-                            }
+                            const result = await sendBlocks(blocksToSend, effectiveContactId, threadType);
                             const logMsg = sendMode === 'all'
-                                ? `[Hỗn hợp/Tin nhắn] ${blocksToSend.length} nội dung gửi lần lượt`
+                                ? `[Hỗn hợp/Tin nhắn] ${result.sent}/${blocksToSend.length} nội dung: ${blocksToSend.map(describeBlock).join(' | ')}`
                                 : `[Hỗn hợp/Tin nhắn] ${message}`;
-                            db.saveSendLog({ ...logBase, message: logMsg, status: 'sent', send_type: 'message',
-                                data_request: JSON.stringify({ type: 'sendMessage', threadId: item.contact_id, threadType, blocks: blocksToSend.length }),
-                                data_response: '' });
-                            Logger.log(`[CRMQueue] Mixed/message ✅ → ${item.contact_id} (${blocksToSend.length} blocks)`);
+                            db.saveSendLog({ ...logBase, message: logMsg, status: result.errors.length > 0 ? 'failed' : 'sent',
+                                error: result.errors.join('; ') || '', send_type: 'message',
+                                data_request: JSON.stringify({ type: 'sendMessage', threadId: effectiveContactId, threadType, blocks: blocksToSend.length, sent: result.sent }),
+                                data_response: result.responses.length > 0 ? JSON.stringify(result.responses.length === 1 ? result.responses[0] : result.responses) : '' });
+                            if (result.errors.length > 0) anyFailed = true;
+                            Logger.log(`[CRMQueue] Mixed/message ✅ → ${effectiveContactId} (${result.sent}/${blocksToSend.length} blocks)`);
 
                         } else if (action === 'friend_request') {
-                            const req = { type: 'sendFriendRequest', msg: friendMsg, userId: item.contact_id };
-                            const resp = await (conn.api as any).sendFriendRequest(friendMsg, item.contact_id);
+                            const req = { type: 'sendFriendRequest', msg: friendMsg, userId: effectiveContactId };
+                            const resp = await (conn.api as any).sendFriendRequest(friendMsg, effectiveContactId);
                             db.saveSendLog({ ...logBase, message: `[Hỗn hợp/Kết bạn] ${friendMsg}`, status: 'sent', send_type: 'friend_request',
                                 data_request: JSON.stringify(req), data_response: JSON.stringify(resp) });
-                            Logger.log(`[CRMQueue] Mixed/friend_request ✅ → ${item.contact_id}`);
+                            Logger.log(`[CRMQueue] Mixed/friend_request ✅ → ${effectiveContactId}`);
 
                         } else if (action === 'invite_to_groups' && mixedGroupIds.length > 0) {
-                            const req = { type: 'inviteUserToGroups', userId: item.contact_id, groupIds: mixedGroupIds };
-                            const resp = await (conn.api as any).inviteUserToGroups(item.contact_id, mixedGroupIds);
+                            const req = { type: 'inviteUserToGroups', userId: effectiveContactId, groupIds: mixedGroupIds };
+                            const resp = await (conn.api as any).inviteUserToGroups(effectiveContactId, mixedGroupIds);
                             db.saveSendLog({ ...logBase,
                                 message: `[Hỗn hợp/Mời nhóm] Mời vào ${mixedGroupIds.length} nhóm: ${mixedGroupIds.join(', ')}`,
                                 status: 'sent', send_type: 'invite_to_group',
                                 data_request: JSON.stringify(req), data_response: JSON.stringify(resp) });
-                            Logger.log(`[CRMQueue] Mixed/invite_to_groups ✅ → ${item.contact_id} into ${mixedGroupIds.length} groups`);
+                            Logger.log(`[CRMQueue] Mixed/invite_to_groups ✅ → ${effectiveContactId} into ${mixedGroupIds.length} groups`);
                         }
                     } catch (actionErr: any) {
-                        const errCode = Number(actionErr?.errorCode ?? actionErr?.code ?? -1);
-                        const req = { type: action, userId: item.contact_id };
+                        const errCode = Number(actionErr?.errorCode ?? actionErr?.code ?? actionErr?.error_code ?? -1);
+                        const req = { type: action, userId: effectiveContactId };
+                        const errResponse = {
+                            error: true,
+                            message: actionErr.message,
+                            errorCode: errCode !== -1 ? errCode : undefined,
+                        };
                         db.saveSendLog({ ...logBase,
-                            message: `[Hỗn hợp/${action}] Lỗi ${errCode}: ${actionErr.message}`,
+                            message: `[Hỗn hợp/${action}] Lỗi: ${actionErr.message}`,
                             status: 'failed', error: actionErr.message,
-                            data_request: JSON.stringify(req), data_response: '' });
-                        Logger.warn(`[CRMQueue] Mixed/${action} ❌ → ${item.contact_id}: ${actionErr.message}`);
+                            data_request: JSON.stringify(req), data_response: JSON.stringify(errResponse) });
+                        Logger.warn(`[CRMQueue] Mixed/${action} ❌ → ${effectiveContactId}: ${actionErr.message}`);
                         anyFailed = true;
                     }
                 }
@@ -272,12 +419,14 @@ class CRMQueueService {
             } else if (campaignType === 'mixed') {
                 // ── Hỗn hợp (cũ / fallback) ──────────────────────────────────────
                 let actionLabel = 'message';
+                let mixedResp: any[] = [];
                 try {
-                    await sendBlock(blocksToSend[0] ?? { id: '', text: '', images: [] }, item.contact_id, 0);
+                    mixedResp = await sendBlock(blocksToSend[0] ?? { id: '', text: '', images: [] }, effectiveContactId, 0);
                 } catch (msgErr: any) {
                     if (isMixedFallbackError(msgErr)) {
-                        Logger.log(`[CRMQueue] Mixed fallback → sendFriendRequest for ${item.contact_id}`);
-                        await (conn.api as any).sendFriendRequest(friendMsg, item.contact_id);
+                        Logger.log(`[CRMQueue] Mixed fallback → sendFriendRequest for ${effectiveContactId}`);
+                        const friendResp = await (conn.api as any).sendFriendRequest(friendMsg, effectiveContactId);
+                        mixedResp = [friendResp];
                         actionLabel = 'friend_request_fallback';
                     } else { throw msgErr; }
                 }
@@ -286,13 +435,13 @@ class CRMQueueService {
                     message: actionLabel === 'message' ? message : `[Kết bạn dự phòng] ${friendMsg}`,
                     status: 'sent',
                     send_type: actionLabel === 'message' ? 'message' : 'friend_request',
-                    data_request: JSON.stringify({ type: actionLabel, contact_id: item.contact_id }),
-                    data_response: '' });
+                    data_request: JSON.stringify({ type: actionLabel, contact_id: effectiveContactId }),
+                    data_response: mixedResp.length > 0 ? JSON.stringify(mixedResp.length === 1 ? mixedResp[0] : mixedResp) : '' });
 
             } else if (campaignType === 'friend_request') {
                 // ── Kết bạn only ─────────────────────────────────────────────────
-                const req = { type: 'sendFriendRequest', msg: friendMsg, userId: item.contact_id };
-                const resp = await (conn.api as any).sendFriendRequest(friendMsg, item.contact_id);
+                const req = { type: 'sendFriendRequest', msg: friendMsg, userId: effectiveContactId };
+                const resp = await (conn.api as any).sendFriendRequest(friendMsg, effectiveContactId);
                 db.updateCampaignContactStatus(item.id!, 'sent');
                 db.saveSendLog({ ...logBase, message: `[Kết bạn] ${friendMsg}`, status: 'sent',
                     data_request: JSON.stringify(req), data_response: JSON.stringify(resp) });
@@ -301,29 +450,28 @@ class CRMQueueService {
                 // ── Mời vào nhóm (standalone) ─────────────────────────────────────
                 const groupIds = mixedGroupIds;
                 if (groupIds.length === 0) throw new Error('Không có nhóm nào được chỉ định trong chiến dịch');
-                const req = { type: 'inviteUserToGroups', userId: item.contact_id, groupIds };
-                const resp = await (conn.api as any).inviteUserToGroups(item.contact_id, groupIds);
+                const req = { type: 'inviteUserToGroups', userId: effectiveContactId, groupIds };
+                const resp = await (conn.api as any).inviteUserToGroups(effectiveContactId, groupIds);
                 db.updateCampaignContactStatus(item.id!, 'sent');
                 db.saveSendLog({ ...logBase,
                     message: `[Mời nhóm] Mời vào ${groupIds.length} nhóm: ${groupIds.join(', ')}`,
                     status: 'sent', send_type: 'invite_to_group',
                     data_request: JSON.stringify(req), data_response: JSON.stringify(resp) });
-                Logger.log(`[CRMQueue] Invite ✅ → ${item.contact_id} into ${groupIds.length} groups`);
+                Logger.log(`[CRMQueue] Invite ✅ → ${effectiveContactId} into ${groupIds.length} groups`);
 
             } else {
                 // ── Tin nhắn only (default) ───────────────────────────────────────
                 const threadType = 0;
-                for (let bi = 0; bi < blocksToSend.length; bi++) {
-                    if (bi > 0) await new Promise(r => setTimeout(r, 1500));
-                    await sendBlock(blocksToSend[bi], item.contact_id, threadType);
-                }
+                const result = await sendBlocks(blocksToSend, effectiveContactId, threadType);
                 const logMsg = sendMode === 'all'
-                    ? `[${blocksToSend.length} nội dung gửi lần lượt] ${message}`
+                    ? `[${result.sent}/${blocksToSend.length} nội dung] ${blocksToSend.map(describeBlock).join(' | ')}`
                     : message;
-                db.updateCampaignContactStatus(item.id!, 'sent');
-                db.saveSendLog({ ...logBase, message: logMsg, status: 'sent',
-                    data_request: JSON.stringify({ type: 'sendMessage', threadId: item.contact_id, threadType, blocks: blocksToSend.length }),
-                    data_response: '' });
+                const finalStatus = result.errors.length > 0 ? 'failed' : 'sent';
+                db.updateCampaignContactStatus(item.id!, finalStatus, result.errors.join('; ') || undefined);
+                db.saveSendLog({ ...logBase, message: logMsg, status: finalStatus,
+                    error: result.errors.join('; ') || '',
+                    data_request: JSON.stringify({ type: 'sendMessage', threadId: effectiveContactId, threadType, blocks: blocksToSend.length, sent: result.sent }),
+                    data_response: result.responses.length > 0 ? JSON.stringify(result.responses.length === 1 ? result.responses[0] : result.responses) : '' });
             }
 
             // Tiêu thụ 1 token
@@ -331,21 +479,36 @@ class CRMQueueService {
             this.lastSentAt.set(zaloId, Date.now());
             db.save();
 
-            Logger.log(`[CRMQueue] ✅ Sent to ${item.contact_id} (campaign ${item.campaign_id})`);
-            this.broadcastProgress(zaloId, item.campaign_id, item.contact_id, 'sent');
+            Logger.log(`[CRMQueue] ✅ Sent to ${effectiveContactId} (campaign ${item.campaign_id})`);
+            this.broadcastProgress(zaloId, item.campaign_id, effectiveContactId, 'sent');
             this.checkCampaignCompletion(item.campaign_id, zaloId);
 
         } catch (err: any) {
-            Logger.error(`[CRMQueue] ❌ Failed to send to ${item.contact_id}: ${err.message}`);
-            db.updateCampaignContactStatus(item.id!, 'failed', err.message);
-            db.saveSendLog({ ...logBase,
-                message: item.template_message || '',
-                status: 'failed', error: err.message,
-                send_type: campaignType === 'friend_request' ? 'friend_request' : campaignType === 'mixed' ? 'mixed' : 'message',
-                data_request: JSON.stringify({ type: campaignType, contact_id: item.contact_id }),
-                data_response: '' });
-            db.save();
-            this.broadcastProgress(zaloId, item.campaign_id, item.contact_id, 'failed', err.message);
+            const errMsg = err?.message || String(err);
+            Logger.error(`[CRMQueue] ❌ Failed to send to ${effectiveContactId}: ${errMsg}`);
+            // Always save log on failure — use describeBlock for human-readable message
+            const fallbackLogMsg = blocksToSend.length > 0
+                ? blocksToSend.map(describeBlock).join(' | ')
+                : (item.template_message || '(unknown)');
+            try {
+                db.updateCampaignContactStatus(item.id!, 'failed', errMsg);
+                // Capture error response details if available
+                const errResponse: any = {
+                    error: true,
+                    message: errMsg,
+                    errorCode: err?.errorCode ?? err?.code ?? err?.error_code ?? undefined,
+                };
+                db.saveSendLog({ ...logBase,
+                    message: `[Lỗi] ${errMsg} — ${fallbackLogMsg}`,
+                    status: 'failed', error: errMsg,
+                    send_type: campaignType === 'friend_request' ? 'friend_request' : campaignType === 'mixed' ? 'mixed' : 'message',
+                    data_request: JSON.stringify({ type: campaignType, contact_id: effectiveContactId }),
+                    data_response: JSON.stringify(errResponse) });
+                db.save();
+            } catch (logErr: any) {
+                Logger.error(`[CRMQueue] ❌ Failed to save error log: ${logErr.message}`);
+            }
+            this.broadcastProgress(zaloId, item.campaign_id, effectiveContactId, 'failed', errMsg);
         } finally {
             this.isProcessing.set(zaloId, false);
         }
@@ -369,21 +532,50 @@ class CRMQueueService {
     }
 
     private broadcastProgress(zaloId: string, campaignId: number, contactId: string, status: string, error?: string): void {
+        const db = DatabaseService.getInstance();
+        const dailyCount = db.getDailySentCountForCampaign(campaignId);
         EventBroadcaster.emit('crm:queueUpdate', {
             zaloId, campaignId, contactId, status, error,
             tokens: this.tokens.get(zaloId) ?? 0,
             maxTokens: this.MAX_TOKENS,
             lastSentAt: this.lastSentAt.get(zaloId) ?? 0,
+            dailySentCount: dailyCount,
         });
     }
 
     private broadcastStatus(zaloId: string, type: string): void {
+        const isDailyPaused = type === 'daily_limit_reached' || type === 'waiting_for_start_time';
         EventBroadcaster.emit('crm:queueStatus', {
             zaloId, type,
             tokens: this.tokens.get(zaloId) ?? 0,
             maxTokens: this.MAX_TOKENS,
             lastSentAt: this.lastSentAt.get(zaloId) ?? 0,
+            dailyPaused: isDailyPaused,
         });
+    }
+
+    /**
+     * Resolve a phone number to Zalo UID via API.
+     * Called at send time to avoid rate limiting when importing phones.
+     * Returns { uid, name } or null if not found.
+     */
+    private async resolvePhoneContact(phone: string, api: any): Promise<{ uid: string; name: string } | null> {
+        try {
+            const res = await api.findUser(phone);
+            const u = res?.response ?? res;
+            if (!u?.uid) return null;
+            let name = u.display_name || u.zalo_name || phone;
+            try {
+                const infoRes = await api.getUserInfo(u.uid);
+                const profile = infoRes?.response?.changed_profiles?.[u.uid] ?? infoRes?.changed_profiles?.[u.uid];
+                if (profile) {
+                    name = profile.displayName || profile.zaloName || profile.name || name;
+                }
+            } catch { /* getUserInfo failure is non-fatal */ }
+            return { uid: String(u.uid), name };
+        } catch {
+            return null;
+        }
     }
 }
 

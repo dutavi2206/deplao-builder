@@ -128,8 +128,11 @@ export interface CRMCampaign {
     template_message: string;
     friend_request_message: string;
     campaign_type: CRMCampaignType;
+    mixed_config?: string;
     status: CRMCampaignStatus;
     delay_seconds: number;
+    daily_send_limit?: number;   // 0 = không giới hạn
+    daily_start_time?: string;   // "HH:MM" format
     created_at?: number;
     updated_at?: number;
     // Computed fields
@@ -137,6 +140,7 @@ export interface CRMCampaign {
     sent_count?: number;
     pending_count?: number;
     failed_count?: number;
+    sent_today_count?: number;   // computed: gửi trong ngày hôm nay
 }
 
 export interface CRMCampaignContact {
@@ -146,6 +150,7 @@ export interface CRMCampaignContact {
     contact_id: string;
     display_name?: string;
     avatar?: string;
+    phone?: string;
     status: CRMContactStatus;
     sent_at?: number;
     retry_count?: number;
@@ -781,6 +786,7 @@ class DatabaseService {
         try { this.exec(`ALTER TABLE crm_campaigns ADD COLUMN friend_request_message TEXT NOT NULL DEFAULT ''`); } catch {}
         try { this.exec(`ALTER TABLE crm_campaigns ADD COLUMN campaign_type TEXT NOT NULL DEFAULT 'message'`); } catch {}
         try { this.exec(`ALTER TABLE crm_campaigns ADD COLUMN mixed_config TEXT NOT NULL DEFAULT '{}'`); } catch {}
+        try { this.exec(`ALTER TABLE crm_campaign_contacts ADD COLUMN phone TEXT NOT NULL DEFAULT ''`); } catch {}
 
         this.exec(`
             CREATE TABLE IF NOT EXISTS crm_campaign_contacts (
@@ -2261,6 +2267,19 @@ class DatabaseService {
             }
         } catch (err: any) {
             Logger.warn(`[DatabaseService] handled_by_employee migration: ${err.message}`);
+        }
+
+        // Migration: add daily_send_limit + daily_start_time to crm_campaigns
+        try {
+            const campCols = this.query<any>(`PRAGMA table_info(crm_campaigns)`);
+            if (campCols.length > 0 && !campCols.some((c: any) => c.name === 'daily_send_limit')) {
+                db!.exec(`ALTER TABLE crm_campaigns ADD COLUMN daily_send_limit INTEGER NOT NULL DEFAULT 0`);
+                db!.exec(`ALTER TABLE crm_campaigns ADD COLUMN daily_start_time TEXT NOT NULL DEFAULT '08:00'`);
+                this.save();
+                Logger.log('[DatabaseService] Migration: added daily_send_limit + daily_start_time to crm_campaigns');
+            }
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] daily_send_limit migration: ${err.message}`);
         }
     }
 
@@ -4634,14 +4653,19 @@ class DatabaseService {
     public getCRMCampaigns(ownerZaloId: string): CRMCampaign[] {
         if (!this.initialized) return [];
         try {
+            // sent_at là milliseconds → so sánh với đầu ngày hôm nay (ms)
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const todayStartMs = todayStart.getTime();
             return this.query<any>(
                 `SELECT c.*,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id) as total_contacts,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='sent') as sent_count,
                     (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='pending') as pending_count,
-                    (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='failed') as failed_count
+                    (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='failed') as failed_count,
+                    (SELECT COUNT(*) FROM crm_campaign_contacts cc WHERE cc.campaign_id=c.id AND cc.status='sent' AND cc.sent_at >= ?) as sent_today_count
                  FROM crm_campaigns c WHERE c.owner_zalo_id=? ORDER BY c.created_at DESC`,
-                [ownerZaloId]
+                [todayStartMs, ownerZaloId]
             );
         } catch (err: any) { Logger.error(`[DB] getCRMCampaigns: ${err.message}`); return []; }
     }
@@ -4661,17 +4685,19 @@ class DatabaseService {
             const type = campaign.campaign_type || 'message';
             const frMsg = campaign.friend_request_message || '';
             const status = campaign.status || 'draft';
-            const mixedCfg = (campaign as any).mixed_config || '{}';
+            const mixedCfg = campaign.mixed_config || '{}';
+            const dailyLimit = campaign.daily_send_limit ?? 0;
+            const dailyStartTime = campaign.daily_start_time || '08:00';
             if (campaign.id) {
                 this.run(
-                    `UPDATE crm_campaigns SET name=?, template_message=?, friend_request_message=?, campaign_type=?, mixed_config=?, status=?, delay_seconds=?, updated_at=? WHERE id=? AND owner_zalo_id=?`,
-                    [campaign.name, campaign.template_message || '', frMsg, type, mixedCfg, status, campaign.delay_seconds || 60, now, campaign.id, campaign.owner_zalo_id]
+                    `UPDATE crm_campaigns SET name=?, template_message=?, friend_request_message=?, campaign_type=?, mixed_config=?, status=?, delay_seconds=?, daily_send_limit=?, daily_start_time=?, updated_at=? WHERE id=? AND owner_zalo_id=?`,
+                    [campaign.name, campaign.template_message || '', frMsg, type, mixedCfg, status, campaign.delay_seconds || 60, dailyLimit, dailyStartTime, now, campaign.id, campaign.owner_zalo_id]
                 );
                 return campaign.id;
             } else {
                 return this.runInsert(
-                    `INSERT INTO crm_campaigns (owner_zalo_id, name, template_message, friend_request_message, campaign_type, mixed_config, status, delay_seconds, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-                    [campaign.owner_zalo_id, campaign.name, campaign.template_message, frMsg, type, mixedCfg, campaign.status || 'draft', campaign.delay_seconds || 60, now, now]
+                    `INSERT INTO crm_campaigns (owner_zalo_id, name, template_message, friend_request_message, campaign_type, mixed_config, status, delay_seconds, daily_send_limit, daily_start_time, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+                    [campaign.owner_zalo_id, campaign.name, campaign.template_message, frMsg, type, mixedCfg, campaign.status || 'draft', campaign.delay_seconds || 60, dailyLimit, dailyStartTime, now, now]
                 );
             }
         } catch (err: any) { Logger.error(`[DB] saveCRMCampaign: ${err.message}`); return 0; }
@@ -4737,14 +4763,14 @@ class DatabaseService {
         } catch (err: any) { Logger.error(`[DB] cloneCRMCampaign: ${err.message}`); return 0; }
     }
 
-    public addCampaignContacts(campaignId: number, ownerZaloId: string, contacts: Array<{ contactId: string; displayName?: string; avatar?: string }>): void {
+    public addCampaignContacts(campaignId: number, ownerZaloId: string, contacts: Array<{ contactId: string; displayName?: string; avatar?: string; phone?: string }>): void {
         if (!this.initialized || !contacts.length) return;
         try {
             const stmt = db!.prepare(
-                `INSERT OR IGNORE INTO crm_campaign_contacts (campaign_id, owner_zalo_id, contact_id, display_name, avatar, status, sent_at, retry_count, error) VALUES (?,?,?,?,?,'pending',0,0,'')`
+                `INSERT OR IGNORE INTO crm_campaign_contacts (campaign_id, owner_zalo_id, contact_id, display_name, avatar, phone, status, sent_at, retry_count, error) VALUES (?,?,?,?,?,?,'pending',0,0,'')`
             );
             for (const c of contacts) {
-                stmt.run(campaignId, ownerZaloId, c.contactId, c.displayName || '', c.avatar || '');
+                stmt.run(campaignId, ownerZaloId, c.contactId, c.displayName || '', c.avatar || '', c.phone || '');
             }
             this.save();
         } catch (err: any) { Logger.error(`[DB] addCampaignContacts: ${err.message}`); }
@@ -4767,6 +4793,17 @@ class DatabaseService {
                 [status, status, sentAt, error || '', incRetry, id]
             );
         } catch (err: any) { Logger.error(`[DB] updateCampaignContactStatus: ${err.message}`); }
+    }
+
+    /** Update contact_id and display_name after phone resolution at send time */
+    public updateCampaignContactId(id: number, newContactId: string, displayName: string): void {
+        if (!this.initialized) return;
+        try {
+            this.run(
+                `UPDATE crm_campaign_contacts SET contact_id=?, display_name=? WHERE id=?`,
+                [newContactId, displayName, id]
+            );
+        } catch (err: any) { Logger.error(`[DB] updateCampaignContactId: ${err.message}`); }
     }
 
     /** Lấy item tiếp theo cần gửi cho account này */
@@ -4814,6 +4851,20 @@ class DatabaseService {
         } catch (err: any) { Logger.error(`[DB] getActiveCampaignOwners: ${err.message}`); return []; }
     }
 
+    /** Đếm số liên hệ đã gửi trong ngày hôm nay cho 1 campaign (dùng cho daily limit check) */
+    public getDailySentCountForCampaign(campaignId: number): number {
+        if (!this.initialized) return 0;
+        try {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const rows = this.query<any>(
+                `SELECT COUNT(*) as cnt FROM crm_campaign_contacts WHERE campaign_id=? AND status='sent' AND sent_at >= ?`,
+                [campaignId, todayStart.getTime()]
+            );
+            return rows[0]?.cnt ?? 0;
+        } catch { return 0; }
+    }
+
     /** Send Log */
     public saveSendLog(log: CRMSendLog): void {
         if (!this.initialized) return;
@@ -4822,7 +4873,7 @@ class DatabaseService {
                 `INSERT INTO crm_send_log (owner_zalo_id, contact_id, display_name, phone, contact_type, campaign_id, message, sent_at, status, error, data_request, data_response, send_type) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                 [log.owner_zalo_id, log.contact_id, log.display_name || '', this.normalizeVietnamPhone(log.phone || ''), log.contact_type || 'user', log.campaign_id || null, log.message, log.sent_at, log.status, log.error || '', log.data_request || '', log.data_response || '', log.send_type || '']
             );
-        } catch (err: any) { Logger.error(`[DB] saveSendLog: ${err.message}`); }
+        } catch (err: any) { Logger.error(`[DB] saveSendLog failed: ${err.message}`); }
     }
 
     public getSendLog(ownerZaloId: string, opts: { contactId?: string; campaignId?: number; limit?: number } = {}): CRMSendLog[] {

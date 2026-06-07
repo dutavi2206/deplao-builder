@@ -35,12 +35,11 @@ const MODELS_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
     { value: 'gpt-4.1',       label: 'GPT-4.1 (legacy, non-reasoning thông minh)' },
   ],
   gemini: [
-    { value: 'gemini-3.1-pro',        label: 'Gemini 3.1 Pro (mạnh nhất — khuyên dùng)' },
-    { value: 'gemini-3.1-flash',      label: 'Gemini 3.1 Flash (nhanh, cân bằng)' },
-    { value: 'gemini-3.0-flash',      label: 'Gemini 3.0 Flash (nhanh, rẻ)' },
-    { value: 'gemini-3.0-flash-lite', label: 'Gemini 3.0 Flash Lite (siêu rẻ)' },
-    { value: 'gemini-2.5-pro',        label: 'Gemini 2.5 Pro (legacy, ổn định)' },
-    { value: 'gemini-2.5-flash',      label: 'Gemini 2.5 Flash (legacy)' },
+    { value: 'gemini-3.5-flash',        label: 'Gemini 3.5 Flash (mới nhất — nhanh, cân bằng — khuyên dùng)' },
+    { value: 'gemini-3.1-pro-preview',  label: 'Gemini 3.1 Pro Preview (mạnh nhất)' },
+    { value: 'gemini-3-flash-preview',  label: 'Gemini 3 Flash Preview (nhanh, ổn định)' },
+    { value: 'gemini-2.5-pro',          label: 'Gemini 2.5 Pro (legacy, ổn định)' },
+    { value: 'gemini-2.5-flash',        label: 'Gemini 2.5 Flash (legacy)' },
   ],
   claude: [
     { value: 'claude-4.6-sonnet-20260301',  label: 'Claude 4.6 Sonnet (mới nhất — khuyên dùng)' },
@@ -51,11 +50,10 @@ const MODELS_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
     { value: 'claude-3-5-haiku-20241022',   label: 'Claude 3.5 Haiku (legacy)' },
   ],
   deepseek: [
-    { value: 'deepseek-chat-v3.2',   label: 'DeepSeek V3.2 (mới nhất — khuyên dùng)' },
-    { value: 'deepseek-chat-v3.1',   label: 'DeepSeek V3.1 (cân bằng)' },
-    { value: 'deepseek-chat',        label: 'DeepSeek V3 (legacy, ổn định)' },
-    { value: 'deepseek-reasoner-r1.5', label: 'DeepSeek R1.5 (lý luận mới nhất)' },
-    { value: 'deepseek-reasoner',    label: 'DeepSeek R1 (lý luận, ổn định)' },
+    { value: 'deepseek-v4-flash',   label: 'DeepSeek V4 Flash (mới nhất — khuyên dùng)' },
+    { value: 'deepseek-v4-pro',     label: 'DeepSeek V4 Pro (thinking, mạnh nhất)' },
+    { value: 'deepseek-chat',       label: 'DeepSeek V3 (deprecated 2026/07/24)' },
+    { value: 'deepseek-reasoner',   label: 'DeepSeek R1 (deprecated 2026/07/24)' },
   ],
   grok: [
     { value: 'grok-4',           label: 'Grok 4 (flagship mạnh nhất)' },
@@ -121,8 +119,6 @@ function normalizeForAI(raw: any, platform: string) {
     image = raw.image?.src || raw.images?.[0]?.src || raw.featured_image || '';
   } else if (platform === 'sapo') {
     image = raw.image?.src || raw.images?.[0]?.src || '';
-  } else if (platform === 'ipos') {
-    image = raw.image_url || raw.image || raw.thumbnail || '';
   } else if (platform === 'nhanh') {
     image = raw.images?.avatar || raw.image || raw.imageUrl || raw.smallImage
       || (typeof raw.images?.[0] === 'string' ? raw.images[0] : '') || '';
@@ -247,7 +243,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
     try {
       const res = await ipc.integration?.list();
       if (res?.success) {
-        const posTypes = ['kiotviet', 'haravan', 'sapo', 'ipos', 'nhanh', 'pancake'];
+        const posTypes = ['kiotviet', 'haravan', 'sapo', 'nhanh', 'pancake'];
         setPosIntegrations(
           (res.integrations || []).filter((i: any) => posTypes.includes(i.type) && i.enabled)
         );

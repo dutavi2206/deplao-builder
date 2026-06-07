@@ -682,7 +682,7 @@ const TOOLS_GUIDE = [
       {
         title: '🏪 POS & Vận chuyển trong Workflow',
         items: [
-          'KiotViet / Haravan / Sapo / iPOS / Nhanh: tra cứu KH, đơn hàng, sản phẩm, tạo đơn',
+          'KiotViet / Haravan / Sapo / Nhanh: tra cứu KH, đơn hàng, sản phẩm, tạo đơn',
           'GHN / GHTK: tạo đơn vận chuyển, tra cứu vận đơn — ngay trong luồng tự động',
           'Casso / SePay (VietQR): lấy lịch sử giao dịch, đối soát thanh toán',
         ],
@@ -697,12 +697,11 @@ const TOOLS_GUIDE = [
     purpose: 'Kết nối Raymond với hệ sinh thái bán hàng, thanh toán, vận chuyển Việt Nam. Tra cứu dữ liệu ngay trong khung chat, nhận webhook tự động, kết hợp Workflow để xử lý end-to-end.',
     sections: [
       {
-        title: '🛒 POS / Bán hàng (5 nền tảng)',
+        title: '🛒 POS / Bán hàng (4 nền tảng)',
         items: [
           'KiotViet: tra cứu khách hàng, đơn hàng, sản phẩm, tạo đơn — phổ biến nhất VN',
           'Haravan: nền tảng TMĐT, tra cứu đơn hàng online, khách hàng',
           'Sapo: quản lý bán hàng đa kênh, tra cứu đơn/khách theo SĐT',
-          'iPOS: POS nhà hàng / F&B, tra cứu hóa đơn, sản phẩm/món ăn',
           'Nhanh.vn: tra cứu đơn, sản phẩm, khách hàng, tạo đơn',
           '→ Tất cả đều tra cứu trực tiếp từ khung chat bằng nút tắt hoặc shortcut',
         ],

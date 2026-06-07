@@ -61,7 +61,7 @@ export default function CampaignDetail({ campaign, zaloId, allLabels, localLabel
   }, [campaign.id, loadContacts]);
 
   const handleConfirmTargets = async (selected: any[]) => {
-    const toAdd = selected.map(c => ({ contactId: c.contact_id, displayName: c.alias || c.display_name, avatar: c.avatar }));
+    const toAdd = selected.map(c => ({ contactId: c.contact_id, displayName: c.alias || c.display_name, avatar: c.avatar, phone: c.phone || '' }));
     await onAddContacts(campaign.id, toAdd);
     await loadContacts();
   };
@@ -78,7 +78,12 @@ export default function CampaignDetail({ campaign, zaloId, allLabels, localLabel
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-white text-sm truncate">{campaign.name}</h3>
-            <p className="text-xs text-gray-500 mt-0.5">⏱ {campaign.delay_seconds}s delay · {campaign.total_contacts} liên hệ</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              ⏱ {campaign.delay_seconds}s delay · {campaign.total_contacts} liên hệ
+              {campaign.daily_send_limit > 0 && (
+                <> · 📊 {campaign.daily_send_limit}/ngày từ {campaign.daily_start_time}</>
+              )}
+            </p>
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
             {/* Nút Sửa: chỉ hiện khi nháp hoặc tạm dừng */}
@@ -113,6 +118,22 @@ export default function CampaignDetail({ campaign, zaloId, allLabels, localLabel
             <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
               <div className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
+          </div>
+        )}
+
+        {/* Daily progress */}
+        {campaign.daily_send_limit > 0 && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[11px] text-gray-500">Hôm nay:</span>
+            <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden max-w-[120px]">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, (campaign.sent_today_count ?? 0) / campaign.daily_send_limit * 100)}%` }}
+              />
+            </div>
+            <span className="text-[11px] text-emerald-400 font-medium tabular-nums">
+              {campaign.sent_today_count ?? 0}/{campaign.daily_send_limit}
+            </span>
           </div>
         )}
 
@@ -170,7 +191,13 @@ export default function CampaignDetail({ campaign, zaloId, allLabels, localLabel
               : <div className="w-7 h-7 rounded-full bg-gray-600 flex items-center justify-center text-xs text-white flex-shrink-0">
                   {(c.display_name || c.contact_id || '?').charAt(0).toUpperCase()}
                 </div>}
-            <span className="flex-1 text-xs text-gray-200 truncate">{c.display_name || c.contact_id}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-200 truncate">{c.display_name || c.contact_id}</p>
+              {c.phone && <p className="text-[11px] text-gray-500 font-mono truncate">{c.phone}</p>}
+              {!c.phone && c.contact_id && c.contact_id !== c.display_name && (
+                <p className="text-[11px] text-gray-600 font-mono truncate">{c.contact_id}</p>
+              )}
+            </div>
             <span className={`text-[11px] flex-shrink-0 ${STATUS_STYLE[c.status]}`}>
               {c.status === 'pending' ? '⏳' : c.status === 'sending' ? '📤' : c.status === 'sent' ? '✓' : '✕'} {c.status}
             </span>
@@ -204,6 +231,8 @@ export default function CampaignDetail({ campaign, zaloId, allLabels, localLabel
             campaign_type: campaign.campaign_type,
             mixed_config: campaign.mixed_config || '{}',
             delay_seconds: campaign.delay_seconds,
+            daily_send_limit: campaign.daily_send_limit,
+            daily_start_time: campaign.daily_start_time,
           }}
           onClose={() => setShowEdit(false)}
           onSave={async (data) => {

@@ -19,6 +19,8 @@ interface CampaignFormData {
   campaign_type: CampaignType;
   mixed_config: string;
   delay_seconds: number;
+  daily_send_limit: number;
+  daily_start_time: string;
 }
 
 interface CampaignCreateModalProps {
@@ -407,6 +409,8 @@ export default function CampaignCreateModal({
   const [saving,        setSaving]       = useState(false);
   const [friendReqMsg,  setFriendReqMsg] = useState(initialData?.friend_request_message ?? '');
   const [activeBlock,   setActiveBlock]  = useState(0);
+  const [dailyLimit,    setDailyLimit]   = useState(initialData?.daily_send_limit ?? 0);
+  const [dailyStartTime, setDailyStartTime] = useState(initialData?.daily_start_time ?? '08:00');
   const friendReqRef = useRef<HTMLTextAreaElement>(null);
 
   const [contentConfig, setContentConfig] = useState<ContentConfig>(() =>
@@ -484,6 +488,8 @@ export default function CampaignCreateModal({
       campaign_type: type,
       mixed_config: buildMixedConfig(),
       delay_seconds: delay,
+      daily_send_limit: dailyLimit,
+      daily_start_time: dailyStartTime,
     });
     setSaving(false);
     onClose();
@@ -605,6 +611,41 @@ export default function CampaignCreateModal({
                 ))}
               </div>
               <p className="text-[10px] text-gray-600 mt-1">± 10s jitter ngẫu nhiên</p>
+            </div>
+
+            {/* Daily Send Limit */}
+            <div>
+              <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider block mb-1.5">📊 Giới hạn/ngày</label>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step={10}
+                    value={dailyLimit || ''}
+                    onChange={e => setDailyLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                    placeholder="Không giới hạn"
+                    className="w-full bg-gray-900 border border-gray-600 rounded-lg px-2.5 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                  <span className="text-[10px] text-gray-500 flex-shrink-0">liên hệ</span>
+                </div>
+                {dailyLimit > 0 && (
+                  <div>
+                    <label className="text-[10px] text-gray-500 block mb-1">Giờ bắt đầu ngày tiếp</label>
+                    <input
+                      type="time"
+                      value={dailyStartTime}
+                      onChange={e => setDailyStartTime(e.target.value || '08:00')}
+                      className="w-full bg-gray-900 border border-gray-600 rounded-lg px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-blue-500 transition-colors"
+                    />
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-600 mt-1">
+                {dailyLimit > 0
+                  ? `Gửi tối đa ${dailyLimit}/ngày, bắt đầu lúc ${dailyStartTime}`
+                  : 'Gửi không giới hạn (theo token bucket)'}
+              </p>
             </div>
 
             {/* Warning */}
