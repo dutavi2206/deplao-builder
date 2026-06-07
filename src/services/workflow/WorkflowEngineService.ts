@@ -838,8 +838,19 @@ class WorkflowEngineService {
       }
 
       case 'zalo.acceptFriendRequest': {
-        const api = this.getApi(ctx.pageId);
-        await api.acceptFriendRequest(cfg.userId);
+        // Use ipcHandlerRegistry to follow same path as UI (auth-based)
+        const { ipcHandlerRegistry } = require('../../../electron/ipc/zaloIpc');
+        const handler = ipcHandlerRegistry?.get('zalo:acceptFriendRequest');
+        if (handler) {
+          const conn = ConnectionManager.getConnection(ctx.pageId);
+          const auth = conn?.auth ? JSON.stringify(conn.auth) : null;
+          if (!auth) throw new Error(`Tài khoản ${ctx.pageId} không có auth`);
+          const result = await handler(null, { auth, userId: cfg.userId });
+          if (result?.error && !result?.success) throw new Error(result.error);
+        } else {
+          const api = this.getApi(ctx.pageId);
+          await api.acceptFriendRequest(cfg.userId);
+        }
         return { success: true };
       }
 
