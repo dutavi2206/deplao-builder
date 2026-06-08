@@ -96,6 +96,18 @@ export default function CRMContactDetailPanel({ contact, allLabels, localLabels,
     if (detailTab === 'history' && activeAccountId) loadHistory();
   }, [detailTab, contact.contact_id]);
 
+  // Re-fetch notes when remote CRM note changes arrive
+  useEffect(() => {
+    const handleNoteChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detailTab === 'info' && activeAccountId) {
+        loadNotes();
+      }
+    };
+    window.addEventListener('ui:noteChanged', handleNoteChange);
+    return () => window.removeEventListener('ui:noteChanged', handleNoteChange);
+  }, [detailTab, activeAccountId, contact.contact_id]);
+
   const loadNotes = async () => {
     if (!activeAccountId) return;
     const res = await ipc.crm?.getNotes({ zaloId: activeAccountId, contactId: contact.contact_id });

@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron';
 import DatabaseService from '../../src/services/database/DatabaseService';
 import WorkflowEngineService, { Workflow, WorkflowChannel } from '../../src/services/workflow/WorkflowEngineService';
+import AppModeManager from '../../src/utils/AppModeManager';
+import EmployeeService from '../../src/services/employee/EmployeeService';
 import { v4 as uuidv4 } from 'uuid';
 import Logger from '../../src/utils/Logger';
 
@@ -28,6 +30,26 @@ function rowToWorkflow(r: any): Workflow {
     };
 }
 
+/** Get assigned zaloIds for the current employee, or null if not in employee mode */
+function getEmployeeAssignedAccounts(): string[] | null {
+    try {
+        const mode = AppModeManager.getInstance().getMode();
+        if (mode !== 'employee') return null;
+
+        const employeeId = AppModeManager.getInstance().getEmployeeId();
+        if (!employeeId) return null;
+
+        const emp = EmployeeService.getInstance().getEmployeeById(employeeId);
+        if (!emp?.assigned_accounts) return null;
+
+        return typeof emp.assigned_accounts === 'string'
+            ? JSON.parse(emp.assigned_accounts)
+            : emp.assigned_accounts;
+    } catch {
+        return null;
+    }
+}
+
 export function registerWorkflowIpc(): void {
 
     // ── Label Event bridge REMOVED — now centralized in databaseIpc.ts and zaloIpc.ts ──
@@ -36,7 +58,21 @@ export function registerWorkflowIpc(): void {
     ipcMain.handle('workflow:list', async () => {
         try {
             const rows = DatabaseService.getInstance().getWorkflows();
-            return { success: true, workflows: rows.map(rowToWorkflow) };
+            let workflows = rows.map(rowToWorkflow);
+
+            // Employee mode: filter workflows by assigned accounts
+            const assignedAccounts = getEmployeeAssignedAccounts();
+            if (assignedAccounts) {
+                const accountSet = new Set(assignedAccounts);
+                workflows = workflows.filter(wf => {
+                    // Global workflows (no pageIds) — always show
+                    if (wf.pageIds.length === 0) return true;
+                    // Only show workflows that include at least one assigned account
+                    return wf.pageIds.some(id => accountSet.has(id));
+                });
+            }
+
+            return { success: true, workflows };
         } catch (e: any) {
             return { success: false, error: e.message, workflows: [] };
         }

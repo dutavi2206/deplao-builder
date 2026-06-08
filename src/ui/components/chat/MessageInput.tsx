@@ -479,6 +479,18 @@ export default function MessageInput() {
     const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
     const mode = isFb ? 'local' : ((localStorage.getItem(`qm_mode_${activeAccountId}`) as 'zalo' | 'local') || 'zalo');
     fetchQuickMessages(auth, activeAccountId, mode).then(setQuickMessages).catch(() => {});
+    // Re-fetch when quick messages change (remote sync or another tab)
+    const handleQMChange = () => {
+      if (!activeAccountId) return;
+      const account = getActiveAccount();
+      if (!account) return;
+      const isFb = account.channel === 'facebook';
+      const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
+      const mode = isFb ? 'local' : ((localStorage.getItem(`qm_mode_${activeAccountId}`) as 'zalo' | 'local') || 'zalo');
+      fetchQuickMessages(auth, activeAccountId, mode).then(setQuickMessages).catch(() => {});
+    };
+    window.addEventListener('ui:quickMessagesChanged', handleQMChange);
+    return () => window.removeEventListener('ui:quickMessagesChanged', handleQMChange);
   }, [activeAccountId]);
 
   useEffect(() => {

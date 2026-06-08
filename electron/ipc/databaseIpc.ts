@@ -2,6 +2,8 @@ import { ipcMain, app, dialog } from 'electron';
 import DatabaseService from '../../src/services/database/DatabaseService';
 import FileStorageService from '../../src/services/file/FileStorageService';
 import WorkflowEngineService from '../../src/services/workflow/WorkflowEngineService';
+import EventBroadcaster from '../../src/services/event/EventBroadcaster';
+import { proxyToBoss } from './proxyHelper';
 import Logger from '../../src/utils/Logger';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -659,6 +661,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:pinMessage', async (_event, { zaloId, threadId, pin }: { zaloId: string; threadId: string; pin: any }) => {
         try {
             DatabaseService.getInstance().pinMessage(zaloId, threadId, pin);
+            EventBroadcaster.emit('db:pinnedMessageChanged', { action: 'pin', ownerZaloId: zaloId, threadId, pin });
+            proxyToBoss('db:pinMessage', { zaloId, threadId, pin });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -668,6 +672,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:unpinMessage', async (_event, { zaloId, threadId, msgId }: { zaloId: string; threadId: string; msgId: string }) => {
         try {
             DatabaseService.getInstance().unpinMessage(zaloId, threadId, msgId);
+            EventBroadcaster.emit('db:pinnedMessageChanged', { action: 'unpin', ownerZaloId: zaloId, threadId, msgId });
+            proxyToBoss('db:unpinMessage', { zaloId, threadId, msgId });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -677,6 +683,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:bringPinnedToTop', async (_event, { zaloId, threadId, msgId }: { zaloId: string; threadId: string; msgId: string }) => {
         try {
             DatabaseService.getInstance().bringPinnedToTop(zaloId, threadId, msgId);
+            EventBroadcaster.emit('db:pinnedMessageChanged', { action: 'bringToTop', ownerZaloId: zaloId, threadId, msgId });
+            proxyToBoss('db:bringPinnedToTop', { zaloId, threadId, msgId });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -698,6 +706,8 @@ export function registerDatabaseIpc() {
         try {
             const id = DatabaseService.getInstance().upsertLocalQuickMessage(zaloId, item);
             DatabaseService.getInstance()['save']?.();
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'upsert', ownerZaloId: zaloId, id, item });
+            proxyToBoss('db:upsertLocalQuickMessage', { zaloId, item });
             return { success: true, id };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -708,6 +718,8 @@ export function registerDatabaseIpc() {
         try {
             DatabaseService.getInstance().deleteLocalQuickMessage(zaloId, id);
             DatabaseService.getInstance()['save']?.();
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'delete', ownerZaloId: zaloId, id });
+            proxyToBoss('db:deleteLocalQuickMessage', { zaloId, id });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -717,6 +729,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:bulkReplaceLocalQuickMessages', async (_event, { zaloId, items }: { zaloId: string; items: any[] }) => {
         try {
             DatabaseService.getInstance().bulkReplaceLocalQuickMessages(zaloId, items);
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'bulkReplace', ownerZaloId: zaloId });
+            proxyToBoss('db:bulkReplaceLocalQuickMessages', { zaloId, items });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -726,6 +740,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:cloneLocalQuickMessages', async (_event, { sourceZaloId, targetZaloId }: { sourceZaloId: string; targetZaloId: string }) => {
         try {
             const count = DatabaseService.getInstance().cloneLocalQuickMessages(sourceZaloId, targetZaloId);
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'clone', ownerZaloId: targetZaloId });
+            proxyToBoss('db:cloneLocalQuickMessages', { sourceZaloId, targetZaloId });
             return { success: true, count };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -744,6 +760,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setLocalQMActive', async (_event, { id, isActive }: { id: number; isActive: number }) => {
         try {
             DatabaseService.getInstance().setLocalQMActive(id, isActive);
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'active', id, isActive });
+            proxyToBoss('db:setLocalQMActive', { id, isActive });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -753,6 +771,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setLocalQMOrder', async (_event, { id, order }: { id: number; order: number }) => {
         try {
             DatabaseService.getInstance().setLocalQMOrder(id, order);
+            EventBroadcaster.emit('db:localQuickMessageChanged', { action: 'reorder', id, order });
+            proxyToBoss('db:setLocalQMOrder', { id, order });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -771,6 +791,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:upsertLocalLabel', async (_event, { label }) => {
         try {
             const id = DatabaseService.getInstance().upsertLocalLabel(label);
+            EventBroadcaster.emit('db:localLabelChanged', { action: 'upsert', label: { ...label, id } });
+            proxyToBoss('db:upsertLocalLabel', { label: { ...label, id } });
             return { success: true, id };
         } catch (error: any) { return { success: false, error: error.message }; }
     });
@@ -778,6 +800,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:deleteLocalLabel', async (_event, { id }) => {
         try {
             DatabaseService.getInstance().deleteLocalLabel(id);
+            EventBroadcaster.emit('db:localLabelChanged', { action: 'delete', labelId: id });
+            proxyToBoss('db:deleteLocalLabel', { id });
             return { success: true };
         } catch (error: any) { return { success: false, error: error.message }; }
     });
@@ -785,6 +809,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setLocalLabelActive', async (_event, { id, isActive }: { id: number; isActive: number }) => {
         try {
             DatabaseService.getInstance().setLocalLabelActive(id, isActive);
+            EventBroadcaster.emit('db:localLabelChanged', { action: 'active', labelId: id, isActive });
+            proxyToBoss('db:setLocalLabelActive', { id, isActive });
             return { success: true };
         } catch (error: any) { return { success: false, error: error.message }; }
     });
@@ -792,6 +818,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setLocalLabelOrder', async (_event, { id, order }: { id: number; order: number }) => {
         try {
             DatabaseService.getInstance().setLocalLabelOrder(id, order);
+            EventBroadcaster.emit('db:localLabelChanged', { action: 'reorder', labelId: id, order });
+            proxyToBoss('db:setLocalLabelOrder', { id, order });
             return { success: true };
         } catch (error: any) { return { success: false, error: error.message }; }
     });
@@ -799,6 +827,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:cloneLocalLabels', async (_event, { sourceZaloId, targetZaloId }) => {
         try {
             const count = DatabaseService.getInstance().cloneLocalLabels(sourceZaloId, targetZaloId);
+            EventBroadcaster.emit('db:localLabelChanged', { action: 'clone' });
+            proxyToBoss('db:cloneLocalLabels', { sourceZaloId, targetZaloId });
             return { success: true, count };
         } catch (err: any) { return { success: false, error: err.message }; }
     });
@@ -833,6 +863,8 @@ export function registerDatabaseIpc() {
             } catch (err: any) {
                 Logger.error(`[databaseIpc] assignLocalLabel workflow event error: ${err.message}`);
             }
+            EventBroadcaster.emit('db:localLabelThreadChanged', { action: 'assign', ownerZaloId: zaloId, labelId, threadId });
+            proxyToBoss('db:assignLocalLabelToThread', { zaloId, labelId, threadId, threadType, labelText, labelColor, labelEmoji });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -860,6 +892,8 @@ export function registerDatabaseIpc() {
             } catch (err: any) {
                 Logger.error(`[databaseIpc] removeLocalLabel workflow event error: ${err.message}`);
             }
+            EventBroadcaster.emit('db:localLabelThreadChanged', { action: 'remove', ownerZaloId: zaloId, labelId, threadId });
+            proxyToBoss('db:removeLocalLabelFromThread', { zaloId, labelId, threadId, threadType, labelText, labelColor, labelEmoji });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -879,6 +913,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setContactFlags', async (_event, { zaloId, contactId, flags }: { zaloId: string; contactId: string; flags: { is_muted?: number; mute_until?: number; is_in_others?: number } }) => {
         try {
             DatabaseService.getInstance().setContactFlags(zaloId, contactId, flags);
+            EventBroadcaster.emit('db:contactFlagsChanged', { ownerZaloId: zaloId, contactId, flags });
+            proxyToBoss('db:setContactFlags', { zaloId, contactId, flags });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -897,6 +933,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setContactAlias', async (_event, { zaloId, contactId, alias }: { zaloId: string; contactId: string; alias: string }) => {
         try {
             DatabaseService.getInstance().setContactAlias(zaloId, contactId, alias);
+            EventBroadcaster.emit('db:contactAliasChanged', { ownerZaloId: zaloId, contactId, alias });
+            proxyToBoss('db:setContactAlias', { zaloId, contactId, alias });
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -972,6 +1010,8 @@ export function registerDatabaseIpc() {
     ipcMain.handle('db:setLocalPinnedConversation', async (_event, { zaloId, threadId, isPinned }: { zaloId: string; threadId: string; isPinned: boolean }) => {
         try {
             DatabaseService.getInstance().setLocalPinnedConversation(zaloId, threadId, isPinned);
+            EventBroadcaster.emit('db:pinnedConversationChanged', { ownerZaloId: zaloId, threadId, isPinned });
+            proxyToBoss('db:setLocalPinnedConversation', { zaloId, threadId, isPinned });
             return { success: true };
         } catch (error: any) { return { success: false, error: error.message }; }
     });

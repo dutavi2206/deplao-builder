@@ -36,12 +36,14 @@ const hasUnsupportedWorkflowNodes = (nodes: any[]): boolean => {
 };
 
 // ── Test-run recipient picker modal ──────────────────────────────────────────
-function TestRunModal({ accounts, workflowPageIds, onRun, onClose }: {
+function TestRunModal({ accounts, workflowPageIds, triggerType, onRun, onClose }: {
   accounts: { zalo_id: string; full_name: string; avatar_url: string; phone?: string }[];
   workflowPageIds: string[];
+  triggerType?: string;
   onRun: (triggerData: any) => void;
   onClose: () => void;
 }) {
+  const isFriendRequest = triggerType === 'trigger.friendRequest';
   const [selectedAccount, setSelectedAccount] = useState('');
   const [friends, setFriends] = useState<{ userId: string; displayName: string; avatar: string }[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(false);
@@ -81,17 +83,27 @@ function TestRunModal({ accounts, workflowPageIds, onRun, onClose }: {
 
   const handleRun = () => {
     if (!selectedFriend || !selectedAccount) return;
-    onRun({
-      zaloId: selectedAccount,
-      threadId: selectedFriend.userId,
-      threadType: 0,
-      fromId: selectedFriend.userId,
-      fromName: selectedFriend.displayName,
-      content: testContent,
-      isGroup: false,
-      isSelf: false,
-      timestamp: Date.now(),
-    });
+    if (isFriendRequest) {
+      onRun({
+        userId: selectedFriend.userId,
+        displayName: selectedFriend.displayName,
+        phone: '',
+        message: '',
+        zaloId: selectedAccount,
+      });
+    } else {
+      onRun({
+        zaloId: selectedAccount,
+        threadId: selectedFriend.userId,
+        threadType: 0,
+        fromId: selectedFriend.userId,
+        fromName: selectedFriend.displayName,
+        content: testContent,
+        isGroup: false,
+        isSelf: false,
+        timestamp: Date.now(),
+      });
+    }
     onClose();
   };
 
@@ -103,7 +115,7 @@ function TestRunModal({ accounts, workflowPageIds, onRun, onClose }: {
         <div className="px-5 py-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
           <div>
             <p className="text-white font-semibold text-sm flex items-center gap-2">▶️ Chạy thử Workflow</p>
-            <p className="text-gray-500 text-[11px] mt-0.5">Chọn người nhận để gửi tin nhắn thử nghiệm</p>
+            <p className="text-gray-500 text-[11px] mt-0.5">{isFriendRequest ? 'Chọn người để mô phỏng lời mời kết bạn' : 'Chọn người nhận để gửi tin nhắn thử nghiệm'}</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-700 transition-colors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -143,6 +155,7 @@ function TestRunModal({ accounts, workflowPageIds, onRun, onClose }: {
           )}
 
           {/* Test message content */}
+          {!isFriendRequest && (
           <div>
             <label className="text-gray-400 text-xs font-medium mb-1.5 block">Nội dung tin nhắn thử ($trigger.content)</label>
             <textarea
@@ -153,11 +166,12 @@ function TestRunModal({ accounts, workflowPageIds, onRun, onClose }: {
               placeholder="Nhập tin nhắn thử nghiệm..."
             />
           </div>
+          )}
 
           {/* Friend picker */}
           <div>
             <label className="text-gray-400 text-xs font-medium mb-1.5 block">
-              Chọn người nhận <span className="text-gray-600">(không thể gửi cho chính mình)</span>
+              {isFriendRequest ? 'Chọn người gửi lời mời kết bạn' : 'Chọn người nhận'} <span className="text-gray-600">(không thể gửi cho chính mình)</span>
             </label>
             <input
               value={search}
@@ -366,6 +380,8 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
   };
 
   // ── Check if workflow has send-message nodes → need recipient picker ─────
+  const triggerNode = nodes.find(n => (n.data?.type || '').startsWith('trigger.'));
+  const triggerType = triggerNode?.data?.type || '';
   const hasSendNodes = nodes.some(n => {
     const t = n.data?.type || '';
     return t === 'zalo.sendMessage' || t === 'zalo.sendImage' || t === 'zalo.sendFile'
@@ -373,7 +389,7 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
   });
 
   const handleRunClick = () => {
-    if (hasSendNodes) {
+    if (hasSendNodes || triggerType === 'trigger.friendRequest') {
       setShowTestRunModal(true);
     } else {
       handleRun();
@@ -687,6 +703,7 @@ export default function WorkflowEditor({ workflowId, onBack }: Props) {
         <TestRunModal
           accounts={accounts}
           workflowPageIds={workflowMeta.pageIds}
+          triggerType={triggerType}
           onRun={(triggerData) => handleRun(triggerData)}
           onClose={() => setShowTestRunModal(false)}
         />

@@ -213,7 +213,15 @@ export default function ConversationList() {
       }
     };
     window.addEventListener('local-labels-changed', handler);
-    return () => window.removeEventListener('local-labels-changed', handler);
+    // Also reload when label-thread assignments change (assign/remove)
+    const handleThreadLabelsChanged = () => {
+      if (activeAccountId) loadLocalLabelsForAccount(activeAccountId).catch(() => {});
+    };
+    window.addEventListener('ui:threadLabelsChanged', handleThreadLabelsChanged);
+    return () => {
+      window.removeEventListener('local-labels-changed', handler);
+      window.removeEventListener('ui:threadLabelsChanged', handleThreadLabelsChanged);
+    };
   }, [activeAccountId]);
 
   useEffect(() => {

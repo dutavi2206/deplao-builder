@@ -1,6 +1,8 @@
 import { ipcMain } from 'electron';
 import DatabaseService from '../../src/services/database/DatabaseService';
 import CRMQueueService from '../../src/services/crm/CRMQueueService';
+import EventBroadcaster from '../../src/services/event/EventBroadcaster';
+import { proxyToBoss } from './proxyHelper';
 
 export function registerCRMIpc(): void {
 
@@ -15,6 +17,8 @@ export function registerCRMIpc(): void {
         try {
             const id = DatabaseService.getInstance().saveCRMNote({ ...note, owner_zalo_id: zaloId });
             DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:noteChanged', { action: 'save', ownerZaloId: zaloId, id, note });
+            proxyToBoss('crm:saveNote', { zaloId, note });
             return { success: true, id };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
@@ -23,6 +27,8 @@ export function registerCRMIpc(): void {
         try {
             DatabaseService.getInstance().deleteCRMNote(noteId, zaloId);
             DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:noteChanged', { action: 'delete', ownerZaloId: zaloId, noteId });
+            proxyToBoss('crm:deleteNote', { zaloId, noteId });
             return { success: true };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
@@ -48,6 +54,8 @@ export function registerCRMIpc(): void {
         try {
             const id = DatabaseService.getInstance().saveCRMCampaign({ ...campaign, owner_zalo_id: zaloId });
             DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'save', ownerZaloId: zaloId, id, campaign });
+            proxyToBoss('crm:saveCampaign', { zaloId, campaign });
             return { success: true, id };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
@@ -56,6 +64,8 @@ export function registerCRMIpc(): void {
         try {
             DatabaseService.getInstance().deleteCRMCampaign(campaignId, zaloId);
             DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'delete', ownerZaloId: zaloId, campaignId });
+            proxyToBoss('crm:deleteCampaign', { zaloId, campaignId });
             return { success: true };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
@@ -66,6 +76,8 @@ export function registerCRMIpc(): void {
             const newId = db.cloneCRMCampaign(campaignId, zaloId, includeContacts, newName);
             if (!newId) return { success: false, error: 'Không thể nhân bản chiến dịch' };
             db.save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'clone', ownerZaloId: zaloId, campaignId: newId });
+            proxyToBoss('crm:cloneCampaign', { zaloId, campaignId, includeContacts, newName });
             return { success: true, id: newId };
         } catch (e: any) { return { success: false, error: e.message }; }
     });
@@ -80,6 +92,8 @@ export function registerCRMIpc(): void {
             if (campaign) {
                 if (status === 'active') CRMQueueService.getInstance().startForAccount(campaign.owner_zalo_id);
                 else if (status === 'paused' || status === 'done') CRMQueueService.getInstance().checkAndStopIfIdle(campaign.owner_zalo_id);
+                EventBroadcaster.emit('crm:campaignChanged', { action: 'status', ownerZaloId: campaign.owner_zalo_id, campaignId, status });
+                proxyToBoss('crm:updateCampaignStatus', { campaignId, status });
             }
             return { success: true };
         } catch (e: any) { return { success: false, error: e.message }; }
@@ -89,6 +103,8 @@ export function registerCRMIpc(): void {
         try {
             DatabaseService.getInstance().addCampaignContacts(campaignId, zaloId, contacts);
             DatabaseService.getInstance().save();
+            EventBroadcaster.emit('crm:campaignChanged', { action: 'contactsAdded', ownerZaloId: zaloId, campaignId });
+            proxyToBoss('crm:addCampaignContacts', { zaloId, campaignId, contacts });
             return { success: true };
         } catch (e: any) { return { success: false, error: e.message }; }
     });

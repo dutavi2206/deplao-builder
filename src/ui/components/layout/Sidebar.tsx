@@ -296,10 +296,10 @@ export default function Sidebar({ onAddAccount }: SidebarProps) {
         {hasPerm('analytics') && (
         <NavBtn icon="analytics"  label="Báo cáo"      active={view === 'analytics'}  onClick={() => setView('analytics')} />
         )}
-        {/* ERP — gated by ERP RBAC (`erp.access`, default-allowed). Inside ERP,
-            fine-grained writes enforced via `useErpPermissions().can(...)` +
+        {/* ERP — gated by module permission AND ERP RBAC (`erp.access`).
+            Inside ERP, fine-grained writes enforced via `useErpPermissions().can(...)` +
             IPC middleware `withErpAuth`. */}
-        {canErpAccess && (
+        {hasPerm('erp') && canErpAccess && (
         <NavBtn icon="erp"        label="Quản lý công việc"   active={view === 'erp'}        onClick={() => setView('erp')} />
         )}
         <NavBtn icon="settings"   label="Cài đặt"      active={view === 'settings'}   onClick={() => setView('settings')} dot={hasNewSettings} />

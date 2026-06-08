@@ -536,6 +536,76 @@ function registerWindowControls() {
   });
 }
 
+/**
+ * Ordered startup: scan all workspaces, start relays + connect Zalo for local workspaces FIRST,
+ * THEN connect remote/employee workspaces. Ensures Boss is ready before employees connect.
+ */
+async function startupAllWorkspaces(): Promise<void> {
+  const wsMgr = WorkspaceManager.getInstance();
+  const db = DatabaseService.getInstance();
+  const allWorkspaces = wsMgr.listWorkspaces();
+  const localWorkspaces = allWorkspaces.filter(w => w.type === 'local');
+  const remoteWorkspaces = allWorkspaces.filter(w => w.type === 'remote' && w.autoConnect);
+
+  // ── Phase 1: Start relay servers for ALL local workspaces with relayAutoStart ──
+  for (const ws of localWorkspaces) {
+    if (!ws.relayAutoStart) continue;
+    try {
+      const HttpRelayService = (await import('../src/services/http/HttpRelayService')).default;
+      const relay = HttpRelayService.getInstance();
+      const port = ws.relayPort || 9900;
+      const res = await relay.start(port); // start() is idempotent — skips if already running
+      if (res?.success) {
+        console.log(`[startupAllWorkspaces] Relay started on port ${res.port} for workspace "${ws.name}"`);
+      }
+    } catch (err: any) {
+      console.error(`[startupAllWorkspaces] Relay start failed for "${ws.name}":`, err.message);
+    }
+  }
+
+  // ── Phase 2: Auto-connect Zalo accounts for ALL local workspaces ──
+  const LoginService = (await import('../src/services/login/LoginService')).default;
+  const loginService = new LoginService();
+  const connectedZaloIds = new Set<string>();
+
+  for (const ws of localWorkspaces) {
+    try {
+      const dbPath = wsMgr.resolveDbPath(ws.dbPath || 'deplao-tool.db');
+      if (!dbPath || !require('fs').existsSync(dbPath)) continue;
+
+      // Read accounts from this workspace's DB (without switching active DB)
+      const accounts = db.queryOtherDb<any[]>(dbPath, (otherDb) => {
+        const rows = otherDb.prepare('SELECT * FROM accounts WHERE is_active = 1').all();
+        return rows;
+      });
+
+      for (const acc of accounts) {
+        if (connectedZaloIds.has(acc.zalo_id)) continue; // already connected
+        try {
+          await loginService.connectUser({
+            cookies: acc.cookies || '',
+            imei: acc.imei || '',
+            userAgent: acc.user_agent || acc.userAgent || '',
+          });
+          connectedZaloIds.add(acc.zalo_id);
+          console.log(`[startupAllWorkspaces] Connected Zalo ${acc.zalo_id} from workspace "${ws.name}"`);
+        } catch (err: any) {
+          console.warn(`[startupAllWorkspaces] Failed to connect ${acc.zalo_id} from "${ws.name}":`, err.message);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[startupAllWorkspaces] Failed to load accounts from "${ws.name}":`, err.message);
+    }
+  }
+
+  // ── Phase 3: Connect remote/employee workspaces (Boss must be ready first) ──
+  if (remoteWorkspaces.length > 0) {
+    console.log(`[startupAllWorkspaces] Connecting ${remoteWorkspaces.length} remote workspace(s)...`);
+    await HttpConnectionManager.getInstance().connectAutoWorkspaces();
+  }
+  HttpConnectionManager.getInstance().startHealthCheck(60_000);
+}
+
 app.whenReady().then(async () => {
   // ── Register local-media:// protocol handler ───────────────────────────
   protocol.handle('local-media', (request) => {
@@ -632,32 +702,10 @@ app.whenReady().then(async () => {
   registerLockScreenIpc();
   // Auto-reconnect Facebook accounts
   setTimeout(() => reconnectAllFBAccounts(), 4000);
-  // Auto-connect remote workspaces with autoConnect=true (after delay for DB + initial workspace switch)
-  setTimeout(() => {
-    HttpConnectionManager.getInstance().connectAutoWorkspaces();
-    // Start periodic health check to detect and reconnect dead connections
-    HttpConnectionManager.getInstance().startHealthCheck(60_000);
-  }, 5000);
-  // Auto-start relay server if configured on active local workspace
-  setTimeout(() => {
-    try {
-      const wsMgr = WorkspaceManager.getInstance();
-      const activeWs = wsMgr.getActiveWorkspace();
-      if (activeWs && activeWs.type === 'local' && activeWs.relayAutoStart) {
-        const port = activeWs.relayPort || 9900;
-        const HttpRelayService = require('../src/services/http/HttpRelayService').default;
-        HttpRelayService.getInstance().start(port).then((res: any) => {
-          if (res?.success) {
-            console.log(`[main] Relay server auto-started on port ${res.port}`);
-          }
-        }).catch((err: any) => {
-          console.error('[main] Relay auto-start failed:', err.message);
-        });
-      }
-    } catch (err: any) {
-      console.error('[main] Relay auto-start error:', err.message);
-    }
-  }, 4000);
+  // Ordered startup: relay + Zalo for all local workspaces FIRST, then remote workspaces
+  setTimeout(() => startupAllWorkspaces().catch(err => {
+    console.error('[main] startupAllWorkspaces error:', err.message);
+  }), 3000);
   // Resume any active CRM campaigns after restart
   setTimeout(() => CRMQueueService.getInstance().resumeActiveCampaigns(), 3000);
   // Initialize ERP Calendar reminders scheduler

@@ -59,7 +59,10 @@ export default function Dashboard() {
     showNotification(`Đang kết nối ${acc.full_name || acc.zalo_id}...`, 'info');
     try {
       const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
-      const res = await ipc.login?.connectAccount(auth);
+      // In employee/remote mode, proxy the reconnect to the Boss
+      const res = isRemoteWs
+        ? await ipc.employee?.proxyAction('login:connect', { ...auth, zaloId: acc.zalo_id })
+        : await ipc.login?.connectAccount(auth);
       if (res?.success) {
         updateAccountStatus(acc.zalo_id, true, true);
         showNotification('Kết nối thành công!', 'success');

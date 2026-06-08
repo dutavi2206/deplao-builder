@@ -231,7 +231,15 @@ export default function CRMPage() {
         }
       });
     });
-    return () => { unsubUpdate?.(); unsubStatus?.(); unsubDone?.(); };
+    // Remote campaign changes (boss/employee sync)
+    const handleCampaignChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.ownerZaloId || detail.ownerZaloId === activeAccountId) {
+        loadCampaigns();
+      }
+    };
+    window.addEventListener('ui:campaignChanged', handleCampaignChange);
+    return () => { unsubUpdate?.(); unsubStatus?.(); unsubDone?.(); window.removeEventListener('ui:campaignChanged', handleCampaignChange); };
   }, [activeAccountId]);
 
   // ── Campaign actions ─────────────────────────────────────────────────────

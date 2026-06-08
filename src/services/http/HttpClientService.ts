@@ -33,10 +33,32 @@ class HttpClientService {
     /** Track consecutive heartbeat failures to trigger SSE reconnect */
     private consecutiveHeartbeatFailures = 0;
 
+    /** SSE watchdog — detect silent TCP drops that res.on('end') never fires for */
+    private lastSseDataAt = 0;
+    private sseWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+    private static SSE_WATCHDOG_INTERVAL = 30_000; // check every 30s
+    private static SSE_STALE_THRESHOLD = 60_000;   // 60s without data = stale
+
+    /** Track if SSE was previously connected (for reconnect vs first-connect detection) */
+    private sseWasConnected = false;
+
+    /** Dedicated HTTP agent for SSE connections (keep-alive, isolated from other requests) */
+    private sseAgent: any = null;
+
+    /** Last successful sync timestamp (for auto delta sync on reconnect) */
+    private lastSyncTs = 0;
+
+    /** CallbackUrl for LAN fallback push from boss */
+    private callbackUrl = '';
+
+    /** Max consecutive heartbeat failures before marking disconnected */
+    private static MAX_HEARTBEAT_FAILURES = 5;
+
     private onStatusChange: ((connected: boolean, latency: number) => void) | null = null;
     private onInitialState: ((data: any) => void) | null = null;
     private onAccountAccessUpdate: ((data: any) => void) | null = null;
     private onSyncProgress: ((phase: string, percent: number) => void) | null = null;
+    private onSSEReconnected: (() => void) | null = null;
 
     /** Channels to forward to local EventBroadcaster */
     private static FORWARD_CHANNELS = [
@@ -79,6 +101,24 @@ class HttpClientService {
         'erp:event:attendanceUpdated',
         'erp:event:departmentUpdated',
         'erp:event:employeeProfileUpdated',
+        // ─── CRM / Settings real-time sync ────────────────────────────
+        'db:localLabelChanged',
+        'db:localLabelThreadChanged',
+        'db:pinnedMessageChanged',
+        'db:localQuickMessageChanged',
+        'crm:campaignChanged',
+        'crm:noteChanged',
+        'db:pinnedConversationChanged',
+        'db:contactFlagsChanged',
+        'db:contactAliasChanged',
+        'event:friendRequestSent',
+        'event:friendRequestRemoved',
+        'crm:queueUpdate',
+        'crm:queueStatus',
+        'crm:campaignDone',
+        'workflow:executed',
+        'integration:payment',
+        'integration:webhook',
     ];
 
     public static getInstance(): HttpClientService {
@@ -114,14 +154,26 @@ class HttpClientService {
                 return { success: false, error: 'Không thể kết nối tới Boss. Kiểm tra địa chỉ và relay server đã bật chưa.' };
             }
 
-            // 2. Register with Boss via heartbeat (no callbackUrl needed in SSE mode)
+            // 2. Start local HTTP server for LAN callback fallback (non-fatal if fails)
+            this.callbackUrl = '';
+            try {
+                await this.startLocalServer();
+                this.callbackUrl = `http://${this.getLocalIP()}:${this.localPort}`;
+                Logger.log(`[HttpClientService] LAN callback server ready at ${this.callbackUrl}`);
+            } catch {
+                // WAN-only mode — local server not needed, SSE is the only channel
+                Logger.log('[HttpClientService] Local server not available (WAN-only mode)');
+            }
+
+            // 3. Register with Boss via heartbeat (sends callbackUrl for LAN fallback)
             const hbResult = await this.httpPost(
                 `${this.bossUrl}/api/auth/heartbeat`,
-                { callbackUrl: '' },
+                { callbackUrl: this.callbackUrl },
                 { Authorization: `Bearer ${token}` }
             );
 
             if (!hbResult.success) {
+                this.stopLocalServer(); // Clean up local server before returning
                 return { success: false, error: hbResult.error || 'Không thể kết nối tới Boss' };
             }
 
@@ -130,10 +182,10 @@ class HttpClientService {
             this.onStatusChange?.(true, 0);
             this.startHeartbeat();
 
-            // 3. Start SSE connection for real-time event stream (primary method)
+            // 4. Start SSE connection for real-time event stream (primary method)
             this.connectSSE();
 
-            // 4. Fetch initial snapshot (SSE will also push it, but fetch as early warmup)
+            // 5. Fetch initial snapshot (SSE will also push it, but fetch as early warmup)
             try {
                 const snapshot = await this.httpGet(
                     `${this.bossUrl}/api/sync/snapshot`,
@@ -158,11 +210,14 @@ class HttpClientService {
         this.stopHeartbeat();
         this.stopLocalServer();
         this.disconnectSSE();
+        this.stopSSEWatchdog();
         this.onStatusChange = null;
         this.onInitialState = null;
         this.onAccountAccessUpdate = null;
         this.onSyncProgress = null;
+        this.onSSEReconnected = null;
         this.connected = false;
+        this.callbackUrl = '';
         Logger.log('[HttpClientService] Disconnected');
     }
 
@@ -222,11 +277,43 @@ class HttpClientService {
     public setOnSyncProgress(cb: (phase: string, percent: number) => void): void {
         this.onSyncProgress = cb;
     }
+    public setOnSSEReconnected(cb: () => void): void {
+        this.onSSEReconnected = cb;
+    }
     public setWorkspaceId(id: string): void {
         this.workspaceId = id;
     }
+    public setLastSyncTs(ts: number): void {
+        this.lastSyncTs = ts;
+    }
+    public getLastSyncTs(): number {
+        return this.lastSyncTs;
+    }
 
     // ─── Data Sync ────────────────────────────────────────────────────
+
+    /** Request fresh account/employee snapshot from Boss (for SSE reconnect recovery) */
+    public async requestSnapshot(): Promise<{ success: boolean; snapshot?: any; error?: string }> {
+        if (!this.connected) {
+            return { success: false, error: 'Chưa kết nối tới BOSS' };
+        }
+        try {
+            const result = await this.httpGet(
+                `${this.bossUrl}/api/sync/snapshot`,
+                { Authorization: `Bearer ${this.token}` },
+                15000
+            );
+            if (!result?.success || !result?.snapshot) {
+                return { success: false, error: result?.error || 'Snapshot failed' };
+            }
+            // Forward snapshot to renderer as initialState (refreshes account status)
+            this.onInitialState?.(result.snapshot);
+            Logger.log(`[HttpClientService] Snapshot refreshed: assigned=${result.snapshot.assignedAccounts?.length || 0}, online=${result.snapshot.onlineAccounts?.length || 0}`);
+            return { success: true, snapshot: result.snapshot };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    }
 
     public async requestFullSync(_zaloIds: string[]): Promise<{ success: boolean; payload?: SyncPayload; syncTs?: number; error?: string }> {
         if (!this.connected) {
@@ -294,6 +381,11 @@ class HttpClientService {
                 }
             );
 
+            // Track sync timestamp for auto delta sync on reconnect
+            if (result.syncTs) {
+                this.lastSyncTs = result.syncTs;
+            }
+
             this.onSyncProgress?.('Hoàn tất đồng bộ!', 100);
             return { success: true, syncTs: result.syncTs };
         } catch (err: any) {
@@ -327,6 +419,11 @@ class HttpClientService {
                 }
             );
 
+            // Track sync timestamp for auto delta sync on reconnect
+            if (result.syncTs) {
+                this.lastSyncTs = result.syncTs;
+            }
+
             this.onSyncProgress?.('Hoàn tất cập nhật!', 100);
             return { success: true, syncTs: result.syncTs };
         } catch (err: any) {
@@ -337,7 +434,7 @@ class HttpClientService {
 
     // ─── Local HTTP Server (legacy fallback — kept for backward compat) ──
 
-    /** @deprecated SSE is now used instead. Kept as fallback. */
+    /** Local HTTP server for LAN callback fallback — boss can push events via POST when SSE is down. */
     private startLocalServer(): Promise<void> {
         return new Promise((resolve, reject) => {
             if (this.localServer) {
@@ -449,9 +546,73 @@ class HttpClientService {
             return;
         }
 
+        // Employee sender info: update DB + forward to renderer for store merge
+        if (channel === 'relay:messageSentByEmployee' && data?.zaloId && data?.employee_id) {
+            try {
+                const DatabaseService = require('../database/DatabaseService').default;
+                const WorkspaceManager = require('../../utils/WorkspaceManager').default;
+                const db = DatabaseService.getInstance();
+
+                // Resolve target DB path for this workspace
+                let targetDbPath: string | null = null;
+                if (this.workspaceId) {
+                    const ws = WorkspaceManager.getInstance().getWorkspaceById(this.workspaceId);
+                    if (ws) targetDbPath = WorkspaceManager.getInstance().resolveDbPath(ws.dbPath || 'deplao-tool.db');
+                }
+                const activeDbPath = db.getDbPath();
+                const msgId = String(data.msgId || '');
+                const cliMsgId = String(data.cliMsgId || data.cli_msg_id || '');
+                const threadId = String(data.threadId || data.thread_id || '');
+
+                // Update DB (match by msg_id OR cli_msg_id when available)
+                if (msgId || cliMsgId) {
+                    const updateFn = () => {
+                        if (msgId) db.setMessageHandledByEmployeeFlexible(data.zaloId, msgId, data.employee_id);
+                        if (cliMsgId && cliMsgId !== msgId) db.setMessageHandledByEmployeeFlexible(data.zaloId, cliMsgId, data.employee_id);
+                    };
+                    if (targetDbPath && targetDbPath !== activeDbPath) {
+                        db.withDbPath(targetDbPath, updateFn);
+                    } else {
+                        updateFn();
+                    }
+                } else if (threadId) {
+                    // Thread-based fallback for attachment-only sends (image/file) where msgId is empty
+                    const updateFn = () => {
+                        try {
+                            const rows = db.query(
+                                `SELECT msg_id FROM messages WHERE owner_zalo_id = ? AND thread_id = ? AND is_sent = 1
+                                 AND handled_by_employee IS NULL ORDER BY timestamp DESC LIMIT 1`,
+                                [data.zaloId, threadId]
+                            ) as any[];
+                            if (rows?.[0]?.msg_id) {
+                                db.setMessageHandledByEmployee(data.zaloId, String(rows[0].msg_id), data.employee_id);
+                            }
+                        } catch {}
+                    };
+                    if (targetDbPath && targetDbPath !== activeDbPath) {
+                        db.withDbPath(targetDbPath, updateFn);
+                    } else {
+                        updateFn();
+                    }
+                }
+
+                // Forward to renderer so useZaloEvents can update the store
+                const activeWsId = WorkspaceManager.getInstance().getActiveWorkspaceId();
+                if (activeWsId === this.workspaceId) {
+                    EventBroadcaster.sendDirect(channel, data);
+                }
+                Logger.log(`[HttpClientService] relay:messageSentByEmployee DB update: msgId="${msgId}", threadId="${threadId}", empId="${data.employee_id}"`);
+            } catch (err: any) {
+                Logger.warn(`[HttpClientService] relay:messageSentByEmployee error: ${err.message}`);
+            }
+            return;
+        }
+
+        // Persist conversation-level events from Boss to employee's local DB
+        // (labels, pins, quick messages, CRM, pinned conversations, contact settings)
         if (HttpClientService.FORWARD_CHANNELS.includes(channel)) {
+            this.persistRelayConversationEvent(channel, data);
             // Only forward to renderer when this employee workspace is the active one.
-            // When boss workspace is active, boss's send() already went to renderer.
             try {
                 const WorkspaceManager = require('../../utils/WorkspaceManager').default;
                 const activeWsId = WorkspaceManager.getInstance().getActiveWorkspaceId();
@@ -466,11 +627,160 @@ class HttpClientService {
         }
     }
 
+    /**
+     * Persist conversation-level relay events from Boss to the employee's local DB.
+     * Without this, the renderer re-fetches from an empty local DB and sees nothing.
+     */
+    private persistRelayConversationEvent(channel: string, data: any): void {
+        try {
+            const DatabaseService = require('../database/DatabaseService').default;
+            const WorkspaceManager = require('../../utils/WorkspaceManager').default;
+            const db = DatabaseService.getInstance();
+
+            // Resolve workspace DB path
+            let targetDbPath: string | null = null;
+            if (this.workspaceId) {
+                const ws = WorkspaceManager.getInstance().getWorkspaceById(this.workspaceId);
+                if (ws) targetDbPath = WorkspaceManager.getInstance().resolveDbPath(ws.dbPath || 'deplao-tool.db');
+            }
+            const runOnWsDb = (fn: () => void) => {
+                if (targetDbPath && targetDbPath !== db.getDbPath()) {
+                    db.withDbPath(targetDbPath, fn);
+                } else {
+                    fn();
+                }
+            };
+
+            // ── Labels ──
+            if (channel === 'db:localLabelChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'upsert' && data.label) {
+                        db.upsertLocalLabel(data.label);
+                    } else if (data.action === 'delete' && data.labelId != null) {
+                        db.deleteLocalLabel(data.labelId);
+                    } else if (data.action === 'active' && data.labelId != null) {
+                        db.setLocalLabelActive(data.labelId, data.isActive);
+                    } else if (data.action === 'reorder' && data.labelId != null) {
+                        db.setLocalLabelOrder(data.labelId, data.order);
+                    }
+                });
+                return;
+            }
+
+            // ── Label-Thread assignments ──
+            if (channel === 'db:localLabelThreadChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'assign' && data.ownerZaloId && data.labelId != null && data.threadId) {
+                        db.assignLocalLabelToThread(data.ownerZaloId, data.labelId, data.threadId);
+                    } else if (data.action === 'remove' && data.ownerZaloId && data.labelId != null && data.threadId) {
+                        db.removeLocalLabelFromThread(data.ownerZaloId, data.labelId, data.threadId);
+                    }
+                });
+                return;
+            }
+
+            // ── Pinned messages ──
+            if (channel === 'db:pinnedMessageChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'pin' && data.ownerZaloId && data.threadId && data.pin) {
+                        db.pinMessage(data.ownerZaloId, data.threadId, data.pin);
+                    } else if (data.action === 'unpin' && data.ownerZaloId && data.threadId && data.msgId) {
+                        db.unpinMessage(data.ownerZaloId, data.threadId, data.msgId);
+                    } else if (data.action === 'bringToTop' && data.ownerZaloId && data.threadId && data.msgId) {
+                        db.bringPinnedToTop(data.ownerZaloId, data.threadId, data.msgId);
+                    }
+                });
+                return;
+            }
+
+            // ── Quick messages ──
+            if (channel === 'db:localQuickMessageChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'upsert' && data.ownerZaloId && data.item) {
+                        db.upsertLocalQuickMessage(data.ownerZaloId, data.item);
+                    } else if (data.action === 'delete' && data.ownerZaloId && data.id != null) {
+                        db.deleteLocalQuickMessage(data.ownerZaloId, data.id);
+                    } else if (data.action === 'active' && data.id != null) {
+                        db.setLocalQMActive(data.id, data.isActive);
+                    } else if (data.action === 'reorder' && data.id != null) {
+                        db.setLocalQMOrder(data.id, data.order);
+                    }
+                });
+                return;
+            }
+
+            // ── CRM notes ──
+            if (channel === 'crm:noteChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'save' && data.note) {
+                        db.saveCRMNote({ ...data.note, owner_zalo_id: data.ownerZaloId });
+                    } else if (data.action === 'delete' && data.noteId != null) {
+                        db.deleteCRMNote(data.noteId, data.ownerZaloId);
+                    }
+                });
+                return;
+            }
+
+            // ── CRM campaigns ──
+            if (channel === 'crm:campaignChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.action === 'save' && data.campaign) {
+                        db.saveCRMCampaign({ ...data.campaign, owner_zalo_id: data.ownerZaloId });
+                    } else if (data.action === 'delete' && data.campaignId != null) {
+                        db.deleteCRMCampaign(data.campaignId, data.ownerZaloId);
+                    } else if (data.action === 'status' && data.campaignId != null) {
+                        db.updateCRMCampaignStatus(data.campaignId, data.status);
+                    }
+                });
+                return;
+            }
+
+            // ── Pinned conversations ──
+            if (channel === 'db:pinnedConversationChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.ownerZaloId && data.threadId) {
+                        db.setLocalPinnedConversation(data.ownerZaloId, data.threadId, data.isPinned);
+                    }
+                });
+                return;
+            }
+
+            // ── Contact flags ──
+            if (channel === 'db:contactFlagsChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.ownerZaloId && data.contactId && data.flags) {
+                        db.setContactFlags(data.ownerZaloId, data.contactId, data.flags);
+                    }
+                });
+                return;
+            }
+
+            // ── Contact alias ──
+            if (channel === 'db:contactAliasChanged' && data) {
+                runOnWsDb(() => {
+                    if (data.ownerZaloId && data.contactId) {
+                        db.setContactAlias(data.ownerZaloId, data.contactId, data.alias);
+                    }
+                });
+                return;
+            }
+        } catch (err: any) {
+            Logger.warn(`[HttpClientService] persistRelayConversationEvent error (${channel}): ${err.message}`);
+        }
+    }
+
     // ─── SSE client (receive events from Boss) ──────────────────────
 
     private connectSSE(): void {
         if (!this.connected) return;
         if (this.sseReq) {
+            Logger.warn(`[HttpClientService] connectSSE() called while existing SSE request active — destroying old`);
+            try { this.sseReq.destroy(); } catch {}
+            this.sseReq = null;
+        } else {
+            Logger.log(`[HttpClientService] connectSSE() called (attempt=${this.sseReconnectAttempt})`);
+        }
+        if (this.sseReconnectTimer) {
             try { this.sseReq.destroy(); } catch {}
             this.sseReq = null;
         }
@@ -484,16 +794,24 @@ class HttpClientService {
             const isHttps = urlObj.protocol === 'https:';
             const httpModule = isHttps ? require('https') : require('http');
 
+            // Dedicated agent with keepAlive to prevent socket reuse with other requests
+            if (!this.sseAgent) {
+                const AgentClass = isHttps ? httpModule.Agent : httpModule.Agent;
+                this.sseAgent = new AgentClass({ keepAlive: true, keepAliveMsecs: 30000 });
+            }
+
             const req = httpModule.request(
                 {
                     hostname: urlObj.hostname,
                     port: urlObj.port || (isHttps ? 443 : 80),
                     path: urlObj.pathname,
                     method: 'GET',
+                    agent: this.sseAgent,
                     headers: {
                         Authorization: `Bearer ${this.token}`,
                         Accept: 'text/event-stream',
                         'Cache-Control': 'no-cache',
+                        Connection: 'keep-alive',
                         ...this.getTunnelBypassHeaders(),
                     },
                 },
@@ -517,12 +835,22 @@ class HttpClientService {
 
                     this.sseConnected = true;
                     this.sseReconnectAttempt = 0; // Reset backoff on successful connection
+                    this.lastSseDataAt = Date.now();
+                    this.startSSEWatchdog();
                     Logger.log('[HttpClientService] 📡 SSE stream connected');
+
+                    // Fire reconnect callback (not on first connect, only on reconnect)
+                    if (this.sseWasConnected) {
+                        Logger.log('[HttpClientService] 🔄 SSE reconnected — notifying for delta sync');
+                        try { this.onSSEReconnected?.(); } catch {}
+                    }
+                    this.sseWasConnected = true;
 
                     let buffer = '';
                     let eventData = '';
 
                     res.on('data', (chunk: Buffer) => {
+                        this.lastSseDataAt = Date.now(); // Watchdog: mark SSE alive
                         buffer += chunk.toString();
                         const lines = buffer.split('\n');
                         buffer = lines.pop() || ''; // keep incomplete line
@@ -538,14 +866,19 @@ class HttpClientService {
                                 } catch { /* ignore malformed events */ }
                                 eventData = '';
                             }
-                            // Lines starting with ':' are comments/keepalive — ignore
+                            // Lines starting with ':' are comments/keepalive — also mark alive
+                            else if (line.startsWith(':')) {
+                                this.lastSseDataAt = Date.now();
+                            }
                         }
                     });
 
                     res.on('end', () => {
+                        const aliveMs = this.lastSseDataAt > 0 ? Date.now() - this.lastSseDataAt : -1;
                         this.sseConnected = false;
                         this.sseReq = null;
-                        Logger.log('[HttpClientService] SSE stream ended');
+                        this.stopSSEWatchdog();
+                        Logger.warn(`[HttpClientService] SSE stream ended (alive=${aliveMs}ms, attempt=${this.sseReconnectAttempt})`);
                         if (this.connected) {
                             const delay = Math.min(
                                 3000 * Math.pow(2, this.sseReconnectAttempt),
@@ -559,6 +892,7 @@ class HttpClientService {
                     res.on('error', (err: Error) => {
                         this.sseConnected = false;
                         this.sseReq = null;
+                        this.stopSSEWatchdog();
                         Logger.warn(`[HttpClientService] SSE stream error: ${err.message}`);
                         if (this.connected) {
                             const delay = Math.min(
@@ -575,6 +909,7 @@ class HttpClientService {
             req.on('error', (err: Error) => {
                 this.sseConnected = false;
                 this.sseReq = null;
+                this.stopSSEWatchdog();
                 Logger.warn(`[HttpClientService] SSE request error: ${err.message}`);
                 if (this.connected) {
                     const delay = Math.min(
@@ -606,12 +941,50 @@ class HttpClientService {
             clearTimeout(this.sseReconnectTimer);
             this.sseReconnectTimer = null;
         }
+        this.stopSSEWatchdog();
         if (this.sseReq) {
             try { this.sseReq.destroy(); } catch {}
             this.sseReq = null;
         }
+        if (this.sseAgent) {
+            try { this.sseAgent.destroy(); } catch {}
+            this.sseAgent = null;
+        }
         this.sseConnected = false;
+        this.sseWasConnected = false;
         this.sseReconnectAttempt = 0;
+    }
+
+    // ─── SSE Watchdog ────────────────────────────────────────────────
+
+    /**
+     * Start SSE watchdog that detects silent TCP drops.
+     * If no SSE data received for 60s, forces reconnect.
+     * Catches scenarios where res.on('end') never fires (common with tunnels).
+     */
+    private startSSEWatchdog(): void {
+        this.stopSSEWatchdog();
+        this.sseWatchdogTimer = setInterval(() => {
+            if (!this.sseConnected || !this.connected) return;
+            if (this.lastSseDataAt > 0 && Date.now() - this.lastSseDataAt > HttpClientService.SSE_STALE_THRESHOLD) {
+                Logger.warn(`[HttpClientService] ⏰ SSE watchdog: no data for ${Math.round((Date.now() - this.lastSseDataAt) / 1000)}s — forcing reconnect`);
+                this.sseConnected = false;
+                if (this.sseReq) {
+                    try { this.sseReq.destroy(); } catch {}
+                    this.sseReq = null;
+                }
+                // Force immediate reconnect
+                this.sseReconnectAttempt = 0;
+                this.connectSSE();
+            }
+        }, HttpClientService.SSE_WATCHDOG_INTERVAL);
+    }
+
+    private stopSSEWatchdog(): void {
+        if (this.sseWatchdogTimer) {
+            clearInterval(this.sseWatchdogTimer);
+            this.sseWatchdogTimer = null;
+        }
     }
 
     // ─── Heartbeat ────────────────────────────────────────────────────
@@ -772,7 +1145,7 @@ class HttpClientService {
                     const empInfo = message.data?._employeeInfo;
                     const msgId = message.data?.msgId;
                     if (empInfo?.employee_id && msgId) {
-                        db.setMessageHandledByEmployee(zaloId, String(msgId), empInfo.employee_id);
+                        db.setMessageHandledByEmployeeFlexible(zaloId, String(msgId), empInfo.employee_id);
                     }
                 });
                 Logger.log(`[HttpClientService] Saved relay message to ${targetDbPath} via withDbPath`);
@@ -783,7 +1156,7 @@ class HttpClientService {
                 const empInfo = message.data?._employeeInfo;
                 const msgId = message.data?.msgId;
                 if (empInfo?.employee_id && msgId) {
-                    db.setMessageHandledByEmployee(zaloId, String(msgId), empInfo.employee_id);
+                    db.setMessageHandledByEmployeeFlexible(zaloId, String(msgId), empInfo.employee_id);
                 }
                 Logger.log(`[HttpClientService] Saved relay message to active DB (our workspace)`);
             }
@@ -808,10 +1181,10 @@ class HttpClientService {
 
             const start = Date.now();
             try {
-                // In SSE mode we don't need callbackUrl — boss pushes via SSE stream
+                // Send callbackUrl for LAN fallback — boss can push via HTTP POST if SSE is down
                 const result = await this.httpPost(
                     `${this.bossUrl}/api/auth/heartbeat`,
-                    { callbackUrl: '' },
+                    { callbackUrl: this.callbackUrl },
                     { Authorization: `Bearer ${this.token}` },
                     10000
                 );
@@ -829,6 +1202,12 @@ class HttpClientService {
                         this.sseReconnectAttempt = 0; // Reset backoff for fresh reconnect attempt
                         this.connectSSE();
                     }
+                    // After MAX failures, mark as disconnected so health check can trigger full reconnect
+                    if (this.consecutiveHeartbeatFailures >= HttpClientService.MAX_HEARTBEAT_FAILURES) {
+                        Logger.warn(`[HttpClientService] ${this.consecutiveHeartbeatFailures} consecutive heartbeat failures — marking disconnected`);
+                        this.connected = false;
+                        this.onStatusChange?.(false, 0);
+                    }
                 }
             } catch (err) {
                 this.latencyMs = 0;
@@ -839,6 +1218,12 @@ class HttpClientService {
                     Logger.log(`[HttpClientService] ${this.consecutiveHeartbeatFailures} heartbeat failures (error), forcing SSE reconnect`);
                     this.sseReconnectAttempt = 0;
                     this.connectSSE();
+                }
+                // After MAX failures, mark as disconnected so health check can trigger full reconnect
+                if (this.consecutiveHeartbeatFailures >= HttpClientService.MAX_HEARTBEAT_FAILURES) {
+                    Logger.warn(`[HttpClientService] ${this.consecutiveHeartbeatFailures} consecutive heartbeat failures (error) — marking disconnected`);
+                    this.connected = false;
+                    this.onStatusChange?.(false, 0);
                 }
             }
         }, 15_000);

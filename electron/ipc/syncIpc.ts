@@ -56,8 +56,14 @@ export function registerSyncIpc() {
                         [String(appliedSyncTs), new Date(appliedSyncTs).toISOString()]
                     );
                 } catch {}
-                const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
-                if (activeWs) notifySyncComplete(activeWs.id, 'full', appliedSyncTs);
+                // Also persist to workspace config for auto delta sync on reconnect
+                try {
+                    const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
+                    if (activeWs) {
+                        WorkspaceManager.getInstance().updateWorkspace(activeWs.id, { lastSyncTs: appliedSyncTs } as any);
+                        notifySyncComplete(activeWs.id, 'full', appliedSyncTs);
+                    }
+                } catch {}
             }
             return result;
         } catch (err: any) {
@@ -95,8 +101,14 @@ export function registerSyncIpc() {
                         [String(appliedSyncTs), new Date(appliedSyncTs).toISOString()]
                     );
                 } catch {}
-                const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
-                if (activeWs) notifySyncComplete(activeWs.id, 'delta', appliedSyncTs);
+                // Also persist to workspace config for auto delta sync on reconnect
+                try {
+                    const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
+                    if (activeWs) {
+                        WorkspaceManager.getInstance().updateWorkspace(activeWs.id, { lastSyncTs: appliedSyncTs } as any);
+                        notifySyncComplete(activeWs.id, 'delta', appliedSyncTs);
+                    }
+                } catch {}
             }
             return result;
         } catch (err: any) {

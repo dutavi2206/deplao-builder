@@ -451,6 +451,9 @@ export function registerZaloIpc() {
             try {
                 const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
                 if (activeWs?.type === 'remote' && !params?._fromRelay) {
+                    if (!HttpConnectionManager.getInstance().isConnected(activeWs.id)) {
+                        return { success: false, error: 'Chưa kết nối tới BOSS', response: { labelData: [] } };
+                    }
                     return await HttpConnectionManager.getInstance().proxyAction(activeWs.id, 'zalo:getLabels', params);
                 }
                 const { auth, _fromRelay } = params;
@@ -475,6 +478,9 @@ export function registerZaloIpc() {
             try {
                 const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
                 if (activeWs?.type === 'remote' && !params?._fromRelay) {
+                    if (!HttpConnectionManager.getInstance().isConnected(activeWs.id)) {
+                        return { success: false, error: 'Chưa kết nối tới BOSS' };
+                    }
                     return await HttpConnectionManager.getInstance().proxyAction(activeWs.id, 'zalo:updateLabels', params);
                 }
                 const { auth, isReconnection = false, _fromRelay, labelData, version, labelDiffs, ...rest } = params;

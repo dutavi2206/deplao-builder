@@ -361,7 +361,7 @@ export default function TopBar() {
         <button
           onClick={() => ipc.shell?.openExternal(SUPPORT_GITHUB_URL)}
           className="w-9 h-9 flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-yellow-400 transition-colors"
-          title={"⭐ Star Raymond trên GitHub\nDự án mã nguồn mở — báo lỗi, đóng góp tính năng tại github.com/babyvibe/deplao-builder"}
+          title={"⭐ Star Raymond trên GitHub\nDự án mã nguồn mở — Ủng hộ team bằng cách ghé thăm và thả sao nhé!"}
         >
           {/* GitHub icon với star overlay */}
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">

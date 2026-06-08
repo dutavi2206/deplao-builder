@@ -74,6 +74,24 @@ export function registerEmployeeIpc(): void {
             const result = svc().setPermissions(employeeId, permissions);
             Logger.log(`[employeeIpc] setPermissions → employee=${employeeId} permissions=${permissions.length} success=${result.success}`);
             if (result.success) {
+                // Auto-create ERP profile when erp module is enabled
+                const erpPerm = permissions.find(p => p.module === 'erp');
+                if (erpPerm?.can_access) {
+                    try {
+                        const db = DatabaseService.getInstance();
+                        const existing = db.queryOne(`SELECT 1 FROM erp_employee_profiles WHERE employee_id = ?`, [employeeId]);
+                        if (!existing) {
+                            db.run(
+                                `INSERT OR IGNORE INTO erp_employee_profiles (employee_id, erp_role, extra_json, created_at, updated_at)
+                                 VALUES (?, 'member', '{}', ?, ?)`,
+                                [employeeId, Date.now(), Date.now()]
+                            );
+                            Logger.log(`[employeeIpc] Auto-created ERP profile for employee ${employeeId} with role 'member'`);
+                        }
+                    } catch (erpErr: any) {
+                        Logger.warn(`[employeeIpc] Failed to auto-create ERP profile: ${erpErr.message}`);
+                    }
+                }
                 HttpRelayService.getInstance().refreshEmployeeState(employeeId, 'permissions-updated');
             }
             return result;
@@ -183,6 +201,14 @@ export function registerEmployeeIpc(): void {
         try {
             AppModeManager.getInstance().setMode('employee');
 
+            // Extract employee_id from JWT payload (no verification needed — boss already verified)
+            try {
+                const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+                if (payload.employee_id) {
+                    AppModeManager.getInstance().setEmployeeId(payload.employee_id);
+                }
+            } catch {}
+
             // Workspace-aware: register connection under the active workspace ID
             const activeWs = WorkspaceManager.getInstance().getActiveWorkspace();
             const wsId = activeWs?.id || 'legacy';
@@ -192,6 +218,7 @@ export function registerEmployeeIpc(): void {
             // Also update legacy singleton for backward compat with old callers
             if (!result.success) {
                 AppModeManager.getInstance().setMode('standalone');
+                AppModeManager.getInstance().setEmployeeId(null);
             }
             return result;
         } catch (err: any) {
@@ -209,6 +236,7 @@ export function registerEmployeeIpc(): void {
             // Also disconnect legacy singleton
             HttpClientService.getInstance().disconnect();
             AppModeManager.getInstance().setMode('standalone');
+            AppModeManager.getInstance().setEmployeeId(null);
             return { success: true };
         } catch (err: any) {
             return { success: false, error: err.message };

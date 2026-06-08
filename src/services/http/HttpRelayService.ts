@@ -77,8 +77,8 @@ class HttpRelayService {
      * queued here and flushed the next time the employee's SSE stream reconnects.
      */
     private sseEventQueue = new Map<string, Array<{ channel: string; data: any; ts: number }>>();
-    private static SSE_QUEUE_TTL_MS = 120_000; // 2-minute TTL
-    private static SSE_QUEUE_MAX = 300;        // max queued events per employee
+    private static SSE_QUEUE_TTL_MS = 600_000; // 10-minute TTL (was 2 min — WAN reconnect can take longer)
+    private static SSE_QUEUE_MAX = 500;        // max queued events per employee (was 300)
 
     /** Tunnel state */
     private tunnelActive = false;
@@ -129,19 +129,28 @@ class HttpRelayService {
         }, 15_000);
     }
 
-    /** Check and consume pending employee info for a msgId (with thread fallback) */
-    public static consumePendingEmployeeMsg(msgId: string, zaloId?: string, threadId?: string): {
+    /** Check and consume pending employee info for a msgId (with cliMsgId + thread fallback) */
+    public static consumePendingEmployeeMsg(msgId: string, zaloId?: string, threadId?: string, cliMsgId?: string): {
         employee_id: string; employee_name: string; employee_avatar: string;
         zaloId: string; threadId: string;
     } | null {
-        Logger.log(`[HttpRelayService] 🔎 consumePendingEmployeeMsg: msgId="${msgId}", zaloId="${zaloId}", threadId="${threadId}", maps=${this.pendingEmployeeMsgIds.size}/${this.pendingEmployeeByThread.size}`);
-        // Try by msgId first
+        Logger.log(`[HttpRelayService] 🔎 consumePendingEmployeeMsg: msgId="${msgId}", cliMsgId="${cliMsgId}", zaloId="${zaloId}", threadId="${threadId}", maps=${this.pendingEmployeeMsgIds.size}/${this.pendingEmployeeByThread.size}`);
+        // Try by global msgId first
         if (msgId) {
             const key = String(msgId);
             const info = this.pendingEmployeeMsgIds.get(key);
             if (info) {
                 this.pendingEmployeeMsgIds.delete(key);
-                // Also clean thread map
+                this.pendingEmployeeByThread.delete(`${info.zaloId}:${info.threadId}`);
+                return info;
+            }
+        }
+        // Try by cliMsgId — proxy may have registered under this key
+        if (cliMsgId && cliMsgId !== msgId) {
+            const key = String(cliMsgId);
+            const info = this.pendingEmployeeMsgIds.get(key);
+            if (info) {
+                this.pendingEmployeeMsgIds.delete(key);
                 this.pendingEmployeeByThread.delete(`${info.zaloId}:${info.threadId}`);
                 return info;
             }
@@ -207,6 +216,24 @@ class HttpRelayService {
         'erp:event:noteShared',
         'erp:event:departmentUpdated',
         'erp:event:employeeProfileUpdated',
+        // ─── CRM / Settings real-time sync ────────────────────────────
+        'db:localLabelChanged',
+        'db:localLabelThreadChanged',
+        'db:pinnedMessageChanged',
+        'db:localQuickMessageChanged',
+        'crm:campaignChanged',
+        'crm:noteChanged',
+        'db:pinnedConversationChanged',
+        'db:contactFlagsChanged',
+        'db:contactAliasChanged',
+        'event:friendRequestSent',
+        'event:friendRequestRemoved',
+        'crm:queueUpdate',
+        'crm:queueStatus',
+        'crm:campaignDone',
+        'workflow:executed',
+        'integration:payment',
+        'integration:webhook',
     ];
 
     public static getInstance(): HttpRelayService {
@@ -605,6 +632,33 @@ class HttpRelayService {
                 params = { ...params, _fromRelay: true, _relayZaloId: zaloId };
             }
 
+            // Special handling for login:connect — not in zaloIpc handler registry
+            // Boss looks up real auth from its own DB and connects directly
+            if (channel === 'login:connect' && zaloId) {
+                try {
+                    const realAuth = this.resolveRealAuth(zaloId, {});
+                    if (realAuth) {
+                        // Map DB fields (snake_case) to loginZalo expected format (camelCase)
+                        const authPayload = {
+                            cookies: realAuth.cookies || '',
+                            imei: realAuth.imei || '',
+                            userAgent: realAuth.userAgent || realAuth.user_agent || '',
+                        };
+                        const { ipcMain } = require('electron');
+                        const handlers: Map<string, Function> | undefined = (ipcMain as any)._invokeHandlers;
+                        const loginHandler = handlers?.get('login:connect');
+                        if (loginHandler) {
+                            const result = await loginHandler(null, { auth: authPayload });
+                            Logger.log(`[HttpRelayService] Proxy login:connect for zaloId=${zaloId}: success=${result?.success}`);
+                            return result;
+                        }
+                    }
+                    return { success: false, error: 'Không tìm thấy thông tin xác thực' };
+                } catch (err: any) {
+                    return { success: false, error: err.message };
+                }
+            }
+
             // Use handler registry
             const { ipcHandlerRegistry } = require('../../../electron/ipc/zaloIpc');
             const handler = ipcHandlerRegistry?.get(channel);
@@ -678,19 +732,34 @@ class HttpRelayService {
                         Logger.log(`[HttpRelayService] 📌 setPendingEmployeeMsg: msgId="${msgId}", threadKey="${zaloId}:${threadId}", empId="${empId}"`);
 
                         // Also retry DB update after delays as fallback
-                        if (msgId) {
+                        // Use setMessageHandledByEmployeeFlexible to match by msg_id OR cli_msg_id
+                        // (proxy may return cliMsgId while webhook uses globalMsgId)
+                        // Delay 2s/5s — webhook typically arrives within 200ms-2s
+                        const doFallbackUpdate = (delay: number) => {
                             setTimeout(() => {
                                 try {
-                                    this.runOnPinnedDb((db) => db.setMessageHandledByEmployee(zaloId, msgId, empId));
-                                    Logger.log(`[HttpRelayService] 📌 DB fallback update (500ms): msgId="${msgId}", empId="${empId}"`);
+                                    if (msgId) {
+                                        this.runOnPinnedDb((db) => db.setMessageHandledByEmployeeFlexible(zaloId, msgId, empId));
+                                        Logger.log(`[HttpRelayService] 📌 DB fallback update (${delay}s): msgId="${msgId}", empId="${empId}"`);
+                                    } else if (threadId) {
+                                        // Thread-based fallback for attachment-only sends (image/file) where msgId is empty
+                                        this.runOnPinnedDb((db) => {
+                                            const rows = db.query(
+                                                `SELECT msg_id FROM messages WHERE owner_zalo_id = ? AND thread_id = ? AND is_sent = 1
+                                                 AND handled_by_employee IS NULL ORDER BY timestamp DESC LIMIT 1`,
+                                                [zaloId, threadId]
+                                            ) as any[];
+                                            if (rows?.[0]?.msg_id) {
+                                                db.setMessageHandledByEmployee(zaloId, String(rows[0].msg_id), empId);
+                                                Logger.log(`[HttpRelayService] 📌 DB thread-fallback update (${delay}s): thread="${threadId}", found msgId="${rows[0].msg_id}", empId="${empId}"`);
+                                            }
+                                        });
+                                    }
                                 } catch {}
-                            }, 500);
-                            setTimeout(() => {
-                                try {
-                                    this.runOnPinnedDb((db) => db.setMessageHandledByEmployee(zaloId, msgId, empId));
-                                } catch {}
-                            }, 3000);
-                        }
+                            }, delay);
+                        };
+                        doFallbackUpdate(2000);
+                        doFallbackUpdate(5000);
                     }
 
                     // Broadcast sender info to ALL employees so they know who replied
@@ -877,9 +946,12 @@ class HttpRelayService {
         // Replace any previous SSE stream for this employee
         const old = this.sseClients.get(employee.employee_id);
         if (old && old !== res) {
+            Logger.warn(`[HttpRelayService] ⚠️ Replacing EXISTING SSE for ${employee.display_name} — old.end() called. New request from ${req.socket?.remoteAddress || 'unknown'}`);
             try { old.end(); } catch {}
             const oldKt = this.sseKeepaliveTimers.get(employee.employee_id);
             if (oldKt) clearInterval(oldKt);
+        } else if (!old) {
+            Logger.log(`[HttpRelayService] ℹ️ First SSE connection for ${employee.display_name} from ${req.socket?.remoteAddress || 'unknown'}`);
         }
         this.sseClients.set(employee.employee_id, res);
 

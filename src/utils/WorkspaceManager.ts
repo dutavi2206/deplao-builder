@@ -25,6 +25,7 @@ export interface Workspace {
     employeeName?: string;
     employeeUsername?: string; // login username (for auto re-login)
     autoConnect?: boolean;    // auto-connect on app start
+    lastSyncTs?: number;      // last successful sync timestamp (for auto delta sync on SSE reconnect)
 
     // Cached employee data (so UI works while offline / before boss sends initialState)
     cachedPermissions?: Array<{ module: string; can_access: boolean }>;

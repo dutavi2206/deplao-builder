@@ -1530,4 +1530,43 @@ export function useZaloEvents() {
       unsubEmpSender();
     };
   }, [activeThreadId]);
+
+  // ─── CRM / Settings real-time sync events (from Boss→Employee relay) ──
+  // These events arrive when the remote side mutates labels, pins, QMs, campaigns, notes.
+  // We dispatch CustomEvents so individual components can re-fetch their data.
+  // Separate useEffect([]) so they are NOT torn down on every activeThreadId change.
+  useEffect(() => {
+    if (!ipc.on) return;
+    const unsubs: (() => void)[] = [];
+
+    unsubs.push(ipc.on('db:localLabelChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('local-labels-changed', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:localLabelThreadChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:threadLabelsChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:pinnedMessageChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:pinnedChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:localQuickMessageChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:quickMessagesChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('crm:campaignChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:campaignChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('crm:noteChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:noteChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:pinnedConversationChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:pinnedConversationChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:contactFlagsChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:contactFlagsChanged', { detail: data }));
+    }));
+    unsubs.push(ipc.on('db:contactAliasChanged', (data: any) => {
+      window.dispatchEvent(new CustomEvent('ui:contactAliasChanged', { detail: data }));
+    }));
+
+    return () => { unsubs.forEach(u => u?.()); };
+  }, []);
 }

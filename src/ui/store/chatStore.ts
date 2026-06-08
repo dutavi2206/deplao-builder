@@ -206,8 +206,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((state) => {
       const existing = state.messages[key] || [];
       // Deduplicate by msg_id (dùng String() để tránh type mismatch number vs string)
-      const isDuplicate = existing.some((m) => String(m.msg_id) === String(message.msg_id));
-      if (isDuplicate) return state;
+      const dupIdx = existing.findIndex((m) => String(m.msg_id) === String(message.msg_id));
+      if (dupIdx >= 0) {
+        // Merge handled_by_employee if the new message carries it but existing doesn't
+        // (happens when employee's local listener adds message first without employee info,
+        //  then boss's enriched relay arrives with _employeeInfo)
+        const existingMsg = existing[dupIdx];
+        if (message.handled_by_employee && !existingMsg.handled_by_employee) {
+          const merged = { ...existingMsg, handled_by_employee: message.handled_by_employee };
+          const newMessages = [...existing];
+          newMessages[dupIdx] = merged;
+          return { messages: { ...state.messages, [key]: newMessages } };
+        }
+        return state;
+      }
 
       // Khi real sent message đến (không phải temp_), xóa temp_ message trùng nội dung
       // để tránh hiển thị 2 lần do optimistic update + self-listen echo.

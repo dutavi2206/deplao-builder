@@ -47,8 +47,8 @@ const SYNCABLE_TABLES_GLOBAL = [
     { table: 'ai_assistant_files',    tsCol: 'created_at' },
     { table: 'ai_account_assistants', tsCol: null },
     { table: 'ai_usage_logs',         tsCol: 'created_at' },
-    // Workflows
-    { table: 'workflows',             tsCol: 'updated_at' },
+    // Workflows — synced via custom filter (page_ids must match assigned accounts)
+    // { table: 'workflows',          tsCol: 'updated_at' },  // MOVED to custom export
     { table: 'workflow_run_logs',     tsCol: 'started_at' },
     // Integrations
     { table: 'integrations',          tsCol: 'updated_at' },
@@ -192,6 +192,9 @@ class DataSyncService {
             }
         }
 
+        // Workflows — filter by page_ids matching assigned accounts
+        this.exportWorkflowsFiltered(db, zaloIds, tables);
+
         if (employeeId) this.appendPrivateErpTables(tables, employeeId);
 
         const totalRows = Object.values(tables).reduce((sum, arr) => sum + arr.length, 0);
@@ -260,6 +263,9 @@ class DataSyncService {
                 Logger.warn(`[DataSyncService] Delta skip ${spec.table}: ${err.message}`);
             }
         }
+
+        // Workflows — filter by page_ids matching assigned accounts
+        this.exportWorkflowsFiltered(db, zaloIds, tables, sinceTs);
 
         if (employeeId) this.appendPrivateErpTables(tables, employeeId);
 
@@ -394,6 +400,35 @@ class DataSyncService {
 
         db.forceFlush();
         Logger.log(`[DataSyncService] Employee DB reset for ${zaloIds.length} accounts`);
+    }
+
+    /**
+     * Export workflows filtered by page_ids matching the assigned accounts.
+     * Workflows with no page_ids (empty/global) are always included.
+     */
+    private exportWorkflowsFiltered(db: DatabaseService, zaloIds: string[], tables: Record<string, any[]>, sinceTs?: number): void {
+        try {
+            const zaloSet = new Set(zaloIds);
+            let allWorkflows: any[];
+            if (sinceTs) {
+                allWorkflows = db.query<any>(`SELECT * FROM workflows WHERE updated_at > ?`, [sinceTs]);
+            } else {
+                allWorkflows = db.query<any>(`SELECT * FROM workflows`);
+            }
+            const filtered = allWorkflows.filter(wf => {
+                const pageIdsRaw: string = wf.page_ids || wf.page_id || '';
+                const ids = pageIdsRaw.split(',').filter(Boolean);
+                // Global workflows (no page_ids) — always include
+                if (ids.length === 0) return true;
+                // Include if any page_id matches assigned accounts
+                return ids.some(id => zaloSet.has(id));
+            });
+            if (filtered.length > 0) {
+                tables.workflows = filtered;
+            }
+        } catch (err: any) {
+            Logger.warn(`[DataSyncService] Export skip workflows: ${err.message}`);
+        }
     }
 
     private appendPrivateErpTables(tables: Record<string, any[]>, employeeId: string): void {

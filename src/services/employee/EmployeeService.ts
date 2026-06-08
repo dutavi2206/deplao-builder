@@ -85,6 +85,15 @@ class EmployeeService {
     private runOnDb<T>(fn: (db: DatabaseService) => T): T {
         const db = DatabaseService.getInstance();
         if (this.pinnedDbPath && db.getDbPath() !== this.pinnedDbPath) {
+            // Safety: if pinned directory was deleted, unpin and fall back to current DB
+            try {
+                const dir = require('path').dirname(this.pinnedDbPath);
+                if (!require('fs').existsSync(dir)) {
+                    Logger.warn(`[EmployeeService] Pinned DB directory missing (${dir}), unpinning`);
+                    this.pinnedDbPath = null;
+                    return fn(db);
+                }
+            } catch {}
             return db.withDbPath(this.pinnedDbPath, () => fn(db));
         }
         return fn(db);

@@ -14,6 +14,32 @@ interface VersionEntry {
 // ─── Changelog data — thêm entry mới vào ĐẦU mảng khi có bản cập nhật ────────
 const CHANGELOG: VersionEntry[] = [
   {
+    version: '26.4.8',
+    date: '06/2026',
+    type: 'minor',
+    highlights: [
+      '📡 Nâng cấp kết nối Boss ↔ Nhân viên — ổn định hơn, tự khôi phục khi mất kết nối, đồng bộ realtime',
+      '🔧 Sửa lỗi workflow chấp nhận & từ chối kết bạn không hoạt động đúng',
+    ],
+    changes: [
+      {
+        category: 'improved',
+        items: [
+          'Kết nối Boss ↔ Nhân viên ổn định hơn: tự động phát hiện mất kết nối ngầm và khôi phục, giảm tình trạng nhân viên bị "mất liên lạc" mà không biết',
+          'Fallback qua LAN: khi WAN/tunnel gặp sự cố, nhân viên vẫn nhận dữ liệu qua mạng nội bộ nếu cùng mạng',
+          'Đồng bộ realtime nhãn, ghim tin, tin nhắn nhanh, chiến dịch CRM và ghi chú liên hệ giữa máy boss và nhân viên',
+        ],
+      },
+      {
+        category: 'fixed',
+        items: [
+          'Sửa lỗi workflow không thực thi đúng khi trigger là "Lời mời kết bạn" — chấp nhận và từ chối kết bạn giờ hoạt động bình thường',
+          'Sửa lỗi tin nhắn ghim không đồng bộ giữa boss và nhân viên khi ghim/bỏ ghim'
+        ],
+      },
+    ],
+  },
+  {
     version: '26.4.7',
     date: '06/2026',
     type: 'minor',

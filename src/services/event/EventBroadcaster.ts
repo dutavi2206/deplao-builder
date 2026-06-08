@@ -461,15 +461,15 @@ class EventBroadcaster {
                 try {
                     const HttpRelayService = require('../http/HttpRelayService').default;
                     Logger.log(`[EventBroadcaster] 🔍 Checking pendingEmployeeMsg: msgId="${message.data.msgId}", zaloId="${zaloId}", threadId="${message.threadId || ''}", isSelf=${message.isSelf}`);
-                    const pendingEmp = HttpRelayService.consumePendingEmployeeMsg(message.data.msgId, zaloId, message.threadId || '');
+                    const pendingEmp = HttpRelayService.consumePendingEmployeeMsg(message.data.msgId, zaloId, message.threadId || '', message.data?.cliMsgId || '');
                     Logger.log(`[EventBroadcaster] 🔍 consumePendingEmployeeMsg result: ${pendingEmp ? JSON.stringify({ employee_id: pendingEmp.employee_id, employee_name: pendingEmp.employee_name }) : 'NULL'}`);
                     if (pendingEmp) {
                         const empMsgId = String(message.data.msgId);
                         const db = DatabaseService.getInstance();
                         if (bossDbPath) {
-                            db.withDbPath(bossDbPath, () => db.setMessageHandledByEmployee(zaloId, empMsgId, pendingEmp.employee_id));
+                            db.withDbPath(bossDbPath, () => db.setMessageHandledByEmployeeFlexible(zaloId, empMsgId, pendingEmp.employee_id));
                         } else {
-                            db.setMessageHandledByEmployee(zaloId, empMsgId, pendingEmp.employee_id);
+                            db.setMessageHandledByEmployeeFlexible(zaloId, empMsgId, pendingEmp.employee_id);
                         }
                         Logger.log(`[EventBroadcaster] Tagged message ${empMsgId} as sent by employee ${pendingEmp.employee_id} (${pendingEmp.employee_name})`);
 

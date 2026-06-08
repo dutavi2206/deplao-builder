@@ -1094,7 +1094,7 @@ function EmployeesPanel() {
         <Paragraph>
           Raymond hỗ trợ mô hình <strong>1 Boss — nhiều nhân viên</strong>: Boss chạy app trên máy chủ, bật Relay Server,
           nhân viên kết nối từ máy riêng qua <strong>mạng nội bộ (LAN)</strong> hoặc <strong>từ xa qua WAN / Cloudflare Tunnel</strong>.
-          Toàn bộ tin nhắn và dữ liệu đều được đồng bộ tập trung về máy boss — nhân viên chỉ thao tác, không lưu dữ liệu độc lập.
+          Dữ liệu workspace (DB, media) vẫn lưu trữ trên máy nhân viên. Do Zalo chỉ cho phép 1 kết nối cùng lúc, toàn bộ request Zalo sẽ được chuyển tiếp về máy Boss để xử lý.
         </Paragraph>
         <div className="grid grid-cols-2 gap-2 mt-2">
           {[
@@ -1303,6 +1303,21 @@ function BugReportPanel() {
         </div>
       </div>
 
+      <div className="flex justify-center gap-2">
+        <button
+          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues/new')}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
+        >
+          Tạo Issue mới trên GitHub →
+        </button>
+        <button
+          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues')}
+          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg transition-colors"
+        >
+          Xem danh sách Issues
+        </button>
+      </div>
+
       <Card>
         <SectionTitle>📝 Quy trình báo lỗi — 5 bước</SectionTitle>
         <StepList steps={[
@@ -1393,21 +1408,6 @@ function BugReportPanel() {
           'Gửi yêu cầu tính năng qua mục báo lỗi — tạo issue riêng nhãn "enhancement"',
         ]} />
       </Card>
-
-      <div className="flex justify-center gap-3 pt-2">
-        <button
-          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues/new')}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
-        >
-          Tạo Issue mới trên GitHub →
-        </button>
-        <button
-          onClick={() => ipc.shell?.openExternal('https://github.com/babyvibe/deplao-builder/issues')}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium rounded-lg transition-colors"
-        >
-          Xem danh sách Issues
-        </button>
-      </div>
     </div>
   );
 }

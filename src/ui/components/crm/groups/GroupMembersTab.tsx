@@ -582,7 +582,7 @@ export default function GroupMembersTab() {
                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                   </svg>
-                  <span>Quét nhóm theo link</span>
+                  <span>Join nhóm theo link</span>
                 </button>
               </div>
             )}
@@ -926,8 +926,9 @@ export default function GroupMembersTab() {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-white text-sm">Quét nhóm theo link</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Nhập link mời nhóm Zalo để lấy thông tin &amp; thành viên</p>
+                <h3 className="font-semibold text-white text-sm">Join nhóm theo link</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Nhập link mời nhóm Zalo để tham gia nhóm</p>
+                <p className="text-xs text-gray-400 mt-0.5">Các nhóm công khai thành viên mới quét được thành viên</p>
               </div>
             </div>
 
@@ -1021,15 +1022,13 @@ export default function GroupMembersTab() {
                 </button>
               )}
               {/* Join button — shown after scan success or standalone */}
-              {linkScanInput.trim() && !linkScanLoading && linkJoinStatus !== 'success' && linkJoinStatus !== 'already' && (
-                <button
-                  onClick={joinGroupByLink}
-                  disabled={linkJoinLoading || !linkScanInput.trim()}
-                  title="Yêu cầu tài khoản đang hoạt động tham gia nhóm này"
-                  className="flex-1 py-2 rounded-xl bg-teal-600 text-white text-sm hover:bg-teal-700 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5">
-                  {linkJoinLoading ? <>{SpinIcon} Đang join...</> : '🚪 Join nhóm'}
-                </button>
-              )}
+              <button
+                onClick={joinGroupByLink}
+                disabled={linkJoinLoading || !linkScanInput.trim()}
+                title="Yêu cầu tài khoản đang hoạt động tham gia nhóm này"
+                className="flex-1 py-2 rounded-xl bg-teal-600 text-white text-sm hover:bg-teal-700 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5">
+                {linkJoinLoading ? <>{SpinIcon} Đang join...</> : '🚪 Join nhóm'}
+              </button>
               {linkScanResult && !linkScanLoading && (
                 <button
                   onClick={() => { setLinkScanInput(''); setLinkScanResult(null); setLinkScanError(''); setLinkJoinStatus('idle'); setLinkJoinMsg(''); }}

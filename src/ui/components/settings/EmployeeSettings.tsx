@@ -11,6 +11,7 @@ const ALL_MODULES = [
     { key: 'chat', label: 'Chat', icon: '💬', desc: 'Gửi/nhận tin nhắn', group: 'main' },
     { key: 'friends', label: 'Bạn bè', icon: '👥', desc: 'Danh sách bạn bè', group: 'main' },
     { key: 'crm', label: 'CRM', icon: '📊', desc: 'Quản lý khách hàng', group: 'main' },
+    { key: 'erp', label: 'ERP', icon: '📋', desc: 'Quản lý công việc & dự án', group: 'main' },
     { key: 'workflow', label: 'Workflow', icon: '⚡', desc: 'Tự động hóa', group: 'main' },
     { key: 'integration', label: 'Tích hợp', icon: '🔗', desc: 'Kết nối POS/Shipping', group: 'main' },
     { key: 'analytics', label: 'Thống kê', icon: '📈', desc: 'Báo cáo phân tích', group: 'main' },

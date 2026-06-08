@@ -2556,6 +2556,19 @@ class DatabaseService {
         }
     }
 
+    /** Mark a message as handled by employee — matches by msg_id OR cli_msg_id (fallback for ID mismatch) */
+    public setMessageHandledByEmployeeFlexible(ownerZaloId: string, msgId: string, employeeId: string): void {
+        if (!this.initialized || !msgId || !employeeId) return;
+        try {
+            this.run(
+                `UPDATE messages SET handled_by_employee = ? WHERE owner_zalo_id = ? AND (msg_id = ? OR cli_msg_id = ?)`,
+                [employeeId, ownerZaloId, msgId, msgId]
+            );
+        } catch (err: any) {
+            Logger.warn(`[DatabaseService] setMessageHandledByEmployeeFlexible error: ${err.message}`);
+        }
+    }
+
     /** Lưu tin nhắn hệ thống (sự kiện nhóm) vào DB */
     public saveSystemMessage(ownerZaloId: string, threadId: string, msgId: string, content: string, timestamp: number, updateMembers?: Array<{id: string; dName?: string; avatar?: string; avatar_25?: string}>): void {
         if (!this.initialized) return;

@@ -465,7 +465,15 @@ export function usePinnedMessages(zaloId: string | null, threadId: string | null
         loadPins();
       }
     });
-    return () => { unsub?.(); };
+    // Also listen for local DB pin changes (from boss/employee sync)
+    const handleLocalPinChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.ownerZaloId || detail.ownerZaloId === zaloId) {
+        loadPins();
+      }
+    };
+    window.addEventListener('ui:pinnedChanged', handleLocalPinChange);
+    return () => { unsub?.(); window.removeEventListener('ui:pinnedChanged', handleLocalPinChange); };
   }, [zaloId, threadId, loadPins]);
 
   return { pins, setPins };
@@ -614,7 +622,15 @@ export function usePinnedData(zaloId: string | null, threadId: string | null) {
         loadAll();
       }
     });
-    return () => { unsub?.(); };
+    // Also listen for local DB pin changes (from boss/employee sync)
+    const handleLocalPinChange = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.ownerZaloId || detail.ownerZaloId === zaloId) {
+        loadAll();
+      }
+    };
+    window.addEventListener('ui:pinnedChanged', handleLocalPinChange);
+    return () => { unsub?.(); window.removeEventListener('ui:pinnedChanged', handleLocalPinChange); };
   }, [zaloId, threadId, loadAll]);
 
   // Listen for group note events

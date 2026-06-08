@@ -839,13 +839,13 @@ class WorkflowEngineService {
 
       case 'zalo.acceptFriendRequest': {
         const api = this.getApi(ctx.pageId);
-        await api.acceptFriendRequest({ userId: cfg.userId } as any);
+        await api.acceptFriendRequest(cfg.userId);
         return { success: true };
       }
 
       case 'zalo.rejectFriendRequest': {
         const api = this.getApi(ctx.pageId);
-        await (api as any).rejectFriendRequest({ userId: cfg.userId });
+        await api.rejectFriendRequest(cfg.userId);
         return { success: true };
       }
 
