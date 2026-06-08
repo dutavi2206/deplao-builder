@@ -1,16 +1,25 @@
-# Bug Report: Employee khong gui duoc anh trong CRM Campaign
+# Bug Report: Employee khong gui duoc anh (CRM Campaign + Chat)
 
 ## Mo ta
 
-Khi nhan vien (remote workspace) tao va chay CRM Campaign co anh, khach hang khong nhan duoc anh.
+Employee (remote workspace) **khong gui duoc anh** trong 2 tinh nang:
+1. **CRM Campaign** — khach hang khong nhan duoc anh trong campaign
+2. **Chat truc tiep** — gui anh trong cua so chat that bai
+
 Chi co may Boss moi gui duoc anh thanh cong.
 
 ## Buoc tai hien
 
+### TH1: CRM Campaign
 1. May Mac (employee) dang nhap remote workspace ket noi vao Boss
 2. Tao CRM Campaign voi noi dung co anh (chon anh tu may Mac)
 3. Bat campaign, chay thu
 4. Khach hang chi nhan duoc text, khong co anh
+
+### TH2: Chat truc tiep
+1. Employee (Mac) mo cua so chat voi khach hang
+2. Chon anh tu may Mac va gui
+3. Anh khong duoc gui — khach hang khong nhan duoc
 
 ## Nguyen nhan
 
@@ -32,12 +41,26 @@ const buffer = fs.readFileSync(filePath);
 
 ## File lien quan
 
+### CRM Campaign
 - `electron/ipc/crmIpc.ts` — proxyToBoss chi truyen campaign object (co path), khong truyen file
 - `src/services/crm/CRMQueueService.ts` — doc file bang `fs.readFileSync(filePath)` tren may Boss
 
+### Chat truc tiep
+- `electron/ipc/zaloIpc.ts` — wrap `zalo:sendImages` goi `FileStorageService.resolveAbsolutePath(fp)` tren Boss voi Mac path
+```typescript
+wrap('zalo:sendImages', (s, p) =>
+    s.sendImages(
+        (p.filePaths || []).map((fp: string) => FileStorageService.resolveAbsolutePath(fp)),
+        p.threadId, p.type, p.quote
+    )
+);
+// fp = "/Users/dutavi/Downloads/photo.jpg" → khong ton tai tren Windows Boss
+```
+
 ## Hanh vi mong doi
 
-Employee tao campaign co anh tren may Mac → anh phai duoc gui thanh cong den khach hang.
+- Employee gui anh trong chat → khach hang nhan duoc anh
+- Employee tao campaign co anh → khach hang nhan duoc anh
 
 ## Fix de xuat
 
