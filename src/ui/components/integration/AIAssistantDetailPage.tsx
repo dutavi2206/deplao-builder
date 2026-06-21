@@ -8,6 +8,7 @@ import ipc from '@/lib/ipc';
 import { useAppStore } from '@/store/appStore';
 import {showConfirm} from "@/components/common/ConfirmDialog";
 import PromptWizardModal from './PromptWizardModal';
+import { parseStructuredResponse } from '../../../utils/aiUtils';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ const PLATFORMS = [
   { value: 'deepseek', label: 'DeepSeek',        icon: '🔮', color: 'bg-purple-600' },
   { value: 'grok',     label: 'Grok (xAI)',      icon: '⚡', color: 'bg-orange-600' },
   { value: 'mistral',  label: 'Mistral AI',      icon: '🌀', color: 'bg-sky-600' },
+  { value: '9router',  label: '9Router Proxy',   icon: '🔀', color: 'bg-cyan-600' },
+  { value: 'openrouter', label: 'OpenRouter',    icon: '🔀', color: 'bg-indigo-600' },
 ] as const;
 
 const MODELS_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
@@ -69,6 +72,32 @@ const MODELS_BY_PLATFORM: Record<string, { value: string; label: string }[]> = {
     { value: 'mistral-medium-latest',   label: 'Mistral Medium (cân bằng)' },
     { value: 'open-mistral-nemo-2',     label: 'Mistral Nemo 2 (mở, nhẹ)' },
     { value: 'mistral-large-latest',    label: 'Mistral Large (legacy)' },
+  ],
+  '9router': [
+    { value: 'kr/claude-sonnet-4.5',       label: 'Kiro: Claude 4.5 Sonnet (free)' },
+    { value: 'kr/claude-opus-4.6',         label: 'Kiro: Claude Opus 4.6 (free)' },
+    { value: 'kr/glm-5',                   label: 'Kiro: GLM-5 (free)' },
+    { value: 'kr/minimax',                 label: 'Kiro: MiniMax (free)' },
+    { value: 'oc/deepseek-v4-flash-free',       label: 'OpenCode: DeepSeek V4 Flash (free)' },
+    { value: 'oc/mimo-v2.5-free',               label: 'OpenCode: Mimo 2.5 (free)' },
+    { value: 'oc/qwen3.6-plus-free',             label: 'OpenCode: Qwen 3.6 Plus (free)' },
+    { value: 'glm/glm-4.7',                label: 'GLM-4.7 ($0.6/1M)' },
+    { value: 'minimax/minimax',            label: 'MiniMax ($0.2/1M)' },
+    { value: 'kimi/kimi-k2-thinking',      label: 'Kimi K2 Thinking (free)' },
+    { value: 'vertex/claude-sonnet-4-5',        label: 'Vertex: Claude Sonnet 4.5 (free)' },
+    { value: 'vertex/gemini-3-flash',           label: 'Vertex: Gemini 3 Flash (free)' },
+    { value: 'cc/claude-opus-4-6',         label: 'Claude Code subscription' },
+    { value: 'openrouter/<model>',         label: 'OpenRouter (tùy chọn)' },
+  ],
+  openrouter: [
+    { value: 'openrouter/auto',             label: 'Auto Router (tự chọn model tốt nhất — khuyên dùng)' },
+    { value: 'openai/gpt-5.4-mini',         label: 'GPT-5.4 Mini (OpenAI qua OpenRouter)' },
+    { value: 'anthropic/claude-4.6-sonnet', label: 'Claude 4.6 Sonnet (Anthropic qua OpenRouter)' },
+    { value: 'google/gemini-3.5-flash',     label: 'Gemini 3.5 Flash (Google qua OpenRouter)' },
+    { value: 'deepseek/deepseek-v4-flash',  label: 'DeepSeek V4 Flash (rẻ, nhanh)' },
+    { value: 'meta-llama/llama-4-maverick', label: 'Llama 4 Maverick (Meta, open-source)' },
+    { value: 'qwen/qwen3-max',              label: 'Qwen3 Max (Alibaba)' },
+    { value: 'mistralai/mistral-large-2',   label: 'Mistral Large 2' },
   ],
 };
 
@@ -132,41 +161,18 @@ function normalizeForAI(raw: any, platform: string) {
     image = raw.image || raw.image_url || raw.imageUrl || raw.thumbnail || '';
   }
   const nested = raw.product_info || raw.product || raw.item || {};
-  const id = String(raw.variation_id || raw.id || raw.productId || raw.product_id
-    || raw.item_id || raw.sku || raw.code || Math.random());
+  const primaryId = raw.variation_id || raw.id || raw.productId || raw.product_id
+    || raw.item_id || raw.sku || raw.code;
+  // Tạo _id unique: nếu có ID thật thì dùng, không thì tự sinh (tránh product_id/share ID gây trùng)
+  const id = primaryId
+    ? String(primaryId)
+    : `_auto_${(raw.name || '').slice(0, 6)}_${Math.random().toString(36).slice(2, 10)}`;
   const name = raw.name || raw.fullName || raw.title || raw.productName
     || raw.product_name || nested.name || nested.title || '';
   const price = raw.prices?.retail || raw.basePrice || raw.price || raw.retailPrice
     || raw.retail_price || raw.final_price || nested.price || nested.basePrice || 0;
   const code = raw.code || raw.sku || raw.barcode || raw.productCode || nested.code || nested.sku || '';
   return { ...raw, _id: id, _name: name, _price: Number(price) || 0, _code: code, _image: image };
-}
-
-// ─── Parse structured AI JSON response (text/image segments) ─────────────────
-
-function parseStructuredResponse(raw: string): Array<{ type: 'text' | 'image'; content: any }> | null {
-  if (!raw || typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('[')) return null;
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed) && parsed.length > 0 &&
-        parsed.every((item: any) => item && (item.type === 'text' || item.type === 'image') && item.content !== undefined)) {
-      return parsed;
-    }
-  } catch {
-    try {
-      const jsonMatch = trimmed.match(/\[[\s\S]*]/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed) && parsed.length > 0 &&
-            parsed.every((item: any) => item && (item.type === 'text' || item.type === 'image') && item.content !== undefined)) {
-          return parsed;
-        }
-      }
-    } catch {}
-  }
-  return null;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -185,6 +191,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [model, setModel] = useState('gpt-5.4-mini');
+  const [baseUrl, setBaseUrl] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [posIntegrationId, setPosIntegrationId] = useState('');
   const [maxTokens, setMaxTokens] = useState(1000);
@@ -266,6 +273,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
           setPlatform(a.platform || 'openai');
           setApiKey(a.apiKey || '');
           setModel(a.model || 'gpt-5.4-mini');
+          setBaseUrl(a.baseUrl || '');
           setSystemPrompt(a.systemPrompt || '');
           setPosIntegrationId(a.posIntegrationId || '');
           try { setPinnedProducts(JSON.parse(a.pinnedProductsJson || '[]')); } catch { setPinnedProducts([]); }
@@ -315,6 +323,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
         platform,
         apiKey: apiKey || '***',
         model,
+        baseUrl: baseUrl.trim() || null,
         systemPrompt: systemPrompt.trim(),
         posIntegrationId: posIntegrationId || null,
         pinnedProductsJson: JSON.stringify(pinnedProducts),
@@ -455,12 +464,20 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
       code: p._code || p.code || p.sku || '',
       image: p._image || p.image || p.image_url || '',
     }));
+    let addedCount = 0;
     setPinnedProducts(prev => {
       const existIds = new Set(prev.map((x: any) => x.id));
-      const toAdd = newPinned.filter(x => !existIds.has(x.id));
+      // Dedup cả với prev lẫn trong cùng batch (tránh duplicate id → React key lỗi)
+      const batchIds = new Set<string>();
+      const toAdd = newPinned.filter(x => {
+        if (existIds.has(x.id) || batchIds.has(x.id)) return false;
+        batchIds.add(x.id);
+        return true;
+      });
+      addedCount = toAdd.length;
       return [...prev, ...toAdd];
     });
-    showNotification(`✅ Đã ghim ${newPinned.length} sản phẩm cho AI`, 'success');
+    showNotification(`✅ Đã ghim ${addedCount} sản phẩm cho AI`, 'success');
   };
 
   const handleUnpinProduct = (productId: string) => {
@@ -651,7 +668,32 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                 {platform === 'deepseek' && 'Lấy tại: platform.deepseek.com/api-keys'}
                 {platform === 'grok' && 'Lấy tại: console.x.ai'}
                 {platform === 'mistral' && 'Lấy tại: console.mistral.ai/api-keys'}
+                {platform === '9router' && 'Lấy từ Dashboard -> API Keys 9router tại http://localhost:20128/dashboard'}
+                {platform === 'openrouter' && 'Lấy tại: openrouter.ai/settings/keys'}
               </p>
+              {platform === '9router' && (
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('nav:view', { detail: { view: 'settings' } }));
+                      setTimeout(() => window.dispatchEvent(new CustomEvent('nav:settings', {
+                        detail: { tab: 'introduction', subtab: 'ai-assistant' },
+                      })), 80);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 border border-cyan-600/40 transition-colors"
+                  >
+                    📖 Hướng dẫn tích hợp 9Router
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => ipc.shell?.openExternal('http://localhost:20128')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+                  >
+                    🔗 Mở Dashboard 9Router
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -920,6 +962,17 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                 </p>
               </div>
 
+              {/* Base URL override */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Base URL (tuỳ chọn)</label>
+                <input type="text" value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
+                  placeholder={platform === '9router' ? 'http://localhost:20128' : platform === 'openrouter' ? 'https://openrouter.ai/api' : 'https://api.custom-proxy.com'}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"/>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Ghi đè endpoint API. Để trống để dùng URL mặc định. Hữu ích khi dùng proxy như 9Router, OpenRouter, hoặc các API gateway khác.
+                </p>
+              </div>
+
               {/* Default toggle */}
               <label className="flex items-center gap-3 cursor-pointer py-1">
                 <div className={`relative w-10 h-5 rounded-full transition-colors ${isDefault ? 'bg-blue-600' : 'bg-gray-600'}`}
@@ -1065,7 +1118,7 @@ export default function AIAssistantDetailPage({ assistantId, onBack }: Props) {
                   placeholder="Nhập tin nhắn thử..."
                   rows={1}
                   className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 resize-none outline-none max-h-20 overflow-y-auto"
-                  style={{ minHeight: '24px' }}
+                  style={{ minHeight: '1.5rem' }}
                 />
                 <button onClick={handleChatSend} disabled={chatLoading || !chatInput.trim()}
                   className="w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0">

@@ -10,7 +10,9 @@ import MediaSection, { MediaDetailPanel, MediaTab } from './MediaSection';
 import { UserActionSection } from './ConversationActions';
 import { extractUserProfile } from '../../../utils/profileUtils';
 import GroupAvatar from '../common/GroupAvatar';
+import { toLocalMediaUrl } from '@/lib/localMedia';
 import { getCapability, type Channel } from '../../../configs/channelConfig';
+import { fetchContactInfo } from '@/hooks/useZaloEvents';
 
 function muteUntilToDuration(until: number): number | string {
   if (until === 0) return -1;
@@ -63,6 +65,10 @@ function UserConversationInfo() {
   const contactList = activeAccountId ? (contacts[activeAccountId] || []) : [];
   const contact = contactList.find((c) => c.contact_id === activeThreadId);
   const channelCap = getCapability((contact?.channel || 'zalo') as Channel);
+  // Kiểm tra thêm account channel để fallback đúng cho FB khi contact thiếu channel field
+  const activeAccount = getActiveAccount();
+  const effectiveChannel = (contact?.channel || activeAccount?.channel || 'zalo') as Channel;
+  const effectiveChannelCap = getCapability(effectiveChannel);
   // Hiển thị: ưu tiên alias → display_name
   const displayName = contact?.alias || contact?.display_name || activeThreadId || '';
   const avatarUrl = contact?.avatar_url || '';
@@ -106,6 +112,49 @@ function UserConversationInfo() {
     return () => document.removeEventListener('mousedown', handler);
   }, [muteDropdownOpen]);
 
+  // ── Auto-fetch user info khi vào hội thoại chưa có thông tin ──────────
+  useEffect(() => {
+    if (!activeAccountId || !activeThreadId) return;
+    if (activeThreadType === 1) return; // Group — không áp dụng
+
+    const ctList = useChatStore.getState().contacts[activeAccountId] || [];
+    const ct = ctList.find((c) => c.contact_id === activeThreadId);
+    if (!ct) return;
+
+    const channel = ct.channel || 'zalo';
+    const hasRealName = !!(ct.display_name && ct.display_name !== activeThreadId && !/^\d+$/.test(ct.display_name));
+    const hasAvatar = !!ct.avatar_url;
+    if (hasRealName && hasAvatar) return; // Đã có đủ thông tin
+
+    if (channel === 'zalo') {
+      // Dùng fetchContactInfo có cache 7 ngày + xử lý alias
+      fetchContactInfo(activeAccountId, activeThreadId).catch(() => {});
+    } else if (channel === 'facebook') {
+      ipc.fb?.getUserInfoFacebookHtml({ accountId: activeAccountId, userId: activeThreadId })
+        .then((res: any) => {
+          if (res?.success && (res.name || res.avatarUrl)) {
+            const patch: any = { contact_id: activeThreadId, channel: 'facebook' };
+            if (res.name) patch.display_name = res.name;
+            if (res.avatarUrl) patch.avatar_url = res.avatarUrl;
+            useChatStore.getState().updateContact(activeAccountId!, patch);
+          }
+        })
+        .catch(() => {});
+      if (/^\d+$/.test(activeThreadId)) {
+        ipc.fb?.refreshContactAvatar({ accountId: activeAccountId, userId: activeThreadId })
+          .then((res: any) => {
+            if (res?.success && res.avatarUrl) {
+              useChatStore.getState().updateContact(activeAccountId!, {
+                contact_id: activeThreadId,
+                avatar_url: res.avatarUrl,
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [activeAccountId, activeThreadId, activeThreadType]);
+
   const loadPinStatus = async () => {
     if (!channelCap.supportsPinConversation) return;
     const auth = getAuth();
@@ -124,8 +173,8 @@ function UserConversationInfo() {
     setLoading(true);
     try {
       await loadPinStatus();
-      // Also fetch fresh user profile (avatar, name, phone)
-      if (activeAccountId && activeThreadId) {
+      // Zalo-only: fetch fresh user profile (avatar, name, phone) via API
+      if (activeAccountId && activeThreadId && channelCap.supportsAlias) {
         const auth = getAuth();
         if (auth) {
           try {
@@ -195,7 +244,7 @@ function UserConversationInfo() {
 
   const handleTogglePin = async () => {
     if (!activeThreadId) return;
-    if (!channelCap.supportsPinConversation) {
+    if (!effectiveChannelCap.supportsPinConversation) {
       // FB / non-Zalo: use local pin only
       if (!activeAccountId) return;
       const newVal = !isLocalPinned;
@@ -249,16 +298,27 @@ function UserConversationInfo() {
     }
   };
 
-  /** Reload icon: chỉ refresh alias (biệt danh) từ API */
+  /** Reload alias + user info từ API Zalo — lưu toàn bộ alias + cập nhật thông tin hội thoại hiện tại */
   const handleRefreshAlias = async () => {
     if (!channelCap.supportsAlias) return;
     const auth = getAuth();
     if (!auth || !activeThreadId || !activeAccountId) return;
     setAliasRefreshing(true);
     try {
-      const res = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
-      const rawProfile = res?.response?.changed_profiles?.[activeThreadId]
-        || res?.response?.data?.[activeThreadId];
+      // 1. Update toàn bộ alias từ getAliasList
+      const res = await ipc.zalo?.getAliasList({ auth, count: 5000 });
+      if (!res?.success) return;
+      const items: { userId: string; alias: string }[] = res?.response?.items || [];
+      for (const item of items) {
+        if (item.alias && item.userId) {
+          updateContact(activeAccountId, { contact_id: item.userId, alias: item.alias });
+          ipc.db?.setContactAlias({ zaloId: activeAccountId, contactId: item.userId, alias: item.alias }).catch(() => {});
+        }
+      }
+      // 2. Fetch full profile (tên, avatar, SĐT) cho hội thoại hiện tại
+      const infoRes = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
+      const rawProfile = infoRes?.response?.changed_profiles?.[activeThreadId]
+        || infoRes?.response?.data?.[activeThreadId];
       if (rawProfile) {
         const { displayName: newName, avatar: newAvatar, phone: newPhone, gender, birthday, alias: newAlias } = extractUserProfile(rawProfile);
         const patch: any = { contact_id: activeThreadId };
@@ -413,7 +473,7 @@ function UserConversationInfo() {
       {/* Avatar + name */}
       <div className="flex flex-col items-center py-6 px-4 border-b border-gray-700">
         {avatarUrl ? (
-          <img src={avatarUrl} alt={displayName} className="w-16 h-16 rounded-full object-cover mb-3" />
+          <img src={toLocalMediaUrl(avatarUrl)} alt={displayName} className="w-16 h-16 rounded-full object-cover mb-3" />
         ) : (
           <div className="w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold mb-3 bg-blue-600">
             {(displayName || 'U').charAt(0).toUpperCase()}
@@ -435,7 +495,7 @@ function UserConversationInfo() {
             <p className="text-white font-semibold text-base text-center">{displayName}</p>
             {channelCap.supportsAlias && (
               <button
-                title="Tải lại biệt danh"
+                title="Cập nhật thông tin + tên gợi nhớ"
                 onClick={(e) => { e.stopPropagation(); handleRefreshAlias(); }}
                 className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
                 disabled={aliasRefreshing}
@@ -499,10 +559,10 @@ function UserConversationInfo() {
             </div>
           )}
         </div>
-        {channelCap.supportsPinConversation && (
+        {effectiveChannelCap.supportsPinConversation && (
           <UserActionBtn icon={isPinned ? '📌' : '📍'} label={isPinned ? 'Bỏ ghim' : 'Ghim hội thoại'} onClick={handleTogglePin} active={isPinned} />
         )}
-        {!channelCap.supportsPinConversation && (
+        {!effectiveChannelCap.supportsPinConversation && (
           <UserActionBtn icon={isLocalPinned ? '🔖' : '📎'} label={isLocalPinned ? 'Bỏ ghim app' : 'Ghim trong app'} onClick={handleTogglePin} active={isLocalPinned} />
         )}
         {channelCap.supportsCreateGroup && (

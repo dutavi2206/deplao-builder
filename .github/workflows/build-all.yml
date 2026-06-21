@@ -165,3 +165,71 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: false
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Ubuntu/Linux (x64 — AppImage + deb)
+  # ═══════════════════════════════════════════════════════════════════════════
+  build-ubuntu:
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 🟢 Setup Go 1.x
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: 📦 Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libfuse2 \
+            dpkg-dev \
+          || echo 'WARN: some system deps may be missing'
+
+      - name: 📦 Install npm dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: 🏗️ Build E2EE bridge (Go)
+        run: npm run build:bridge-e2ee
+
+      - name: 🏗️ Compile TypeScript (electron)
+        run: npx tsc -p tsconfig.electron.prod.json
+
+      - name: 🏗️ Build renderer (Vite)
+        run: npx vite build
+        env:
+          NODE_ENV: production
+          BUILD_TARGET: production
+
+      - name: 📦 Build Linux app (x64 — AppImage + deb)
+        run: npx electron-builder --linux --x64 --publish never
+
+      - name: 🚀 Publish Linux → GitHub Releases
+        if: needs.resolve-tag.outputs.should_publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: babyvibe/deplao-builder
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          name: "Deplao ${{ needs.resolve-tag.outputs.tag }}"
+          files: |
+            dist-electron-build/*.AppImage
+            dist-electron-build/*.deb
+            dist-electron-build/*.blockmap
+            dist-electron-build/latest-linux.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          make_latest: false
+          fail_on_unmatched_files: false
+

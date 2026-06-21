@@ -12,6 +12,7 @@ import { getCachedBankCard } from '@/lib/bankCardCache';
 import ipc from '@/lib/ipc';
 import { toLocalMediaUrl } from '@/lib/localMedia';
 import { formatPhone } from '@/utils/phoneUtils';
+import PhoneDisplay from '../common/PhoneDisplay';
 
 // ── Zalo emoji codes → Unicode emoji ─────────────────────────────────────────
 const ZALO_CODE_TO_EMOJI: Record<string, string> = {
@@ -86,7 +87,7 @@ function isFileType(msgType: string, content: string): boolean {
 }
 
 function isStickerType(msgType: string): boolean {
-  return msgType === 'chat.sticker';
+  return msgType === 'chat.sticker' || msgType === 'sticker';
 }
 
 function isRtfMsg(msgType: string, content: string): boolean {
@@ -135,11 +136,11 @@ function isMediaType(msgType: string, content: string): boolean {
 }
 
 function isVideoType(msgType: string): boolean {
-  return msgType === 'chat.video.msg';
+  return msgType === 'chat.video.msg' || msgType === 'video';
 }
 
 function isVoiceType(msgType: string): boolean {
-  return msgType === 'chat.voice';
+  return msgType === 'chat.voice' || msgType === 'audio';
 }
 
 // ── RTF style constants ───────────────────────────────────────────────────────
@@ -167,6 +168,47 @@ function StickerBubble({ msg }: { msg: any }) {
   React.useEffect(() => {
     let cancelled = false;
 
+    // ── Facebook sticker: check local_paths trước (giống MediaBubble) ─
+    if (msg.channel === 'facebook') {
+      // Kiểm tra local file trước (đã được download từ main process)
+      try {
+        const lp: Record<string, string> = typeof msg.local_paths === 'string'
+          ? JSON.parse(msg.local_paths || '{}') : (msg.local_paths || {});
+        const localFile = lp.main || (Object.values(lp)[0] as string) || '';
+        if (localFile) {
+          const localUrl = toLocalMediaUrl(localFile);
+          if (localUrl) {
+            setFailed(false);
+            setStickerUrl(localUrl);
+            return;
+          }
+        }
+      } catch {}
+
+      // E2EE sticker: kiểm tra xem có directPath để download không
+      try {
+        const atts = JSON.parse(msg.attachments || '[]');
+        const hasDirectPath = atts[0]?.directPath;
+        const hasUrl = atts[0]?.url;
+        if (msg.isE2EE && !hasDirectPath && !hasUrl) {
+          console.log(`[StickerBubble] E2EE sticker without URL/directPath — bridge limitation, marking unsupported`);
+          if (!cancelled) setUnsupported(true);
+          return;
+        }
+        // Có directPath → đang chờ main process download → giữ loading state
+        if (msg.isE2EE && hasDirectPath && !stickerUrl) {
+          // Loading state sẽ tự động chuyển khi event:localPath cập nhật local_paths
+        }
+      } catch {}
+
+      // Không có local file → URL từ FB CDN cần auth nên không thử load trực tiếp.
+      // Khi main process download xong, event:localPath sẽ cập nhật store
+      // → component re-render → tìm thấy local_paths → hiển thị sticker.
+      if (!cancelled && !stickerUrl) setFailed(true);
+      return;
+    }
+
+    // ── Zalo sticker: từ content JSON ─────────────────────────────────
     // Try direct URL from content first
     try {
       const c = JSON.parse(msg.content || '{}');
@@ -229,7 +271,7 @@ function StickerBubble({ msg }: { msg: any }) {
     };
     load();
     return () => { cancelled = true; };
-  }, [msg.content]);
+  }, [msg.content, msg.local_paths, msg.attachments]);
 
   if (unsupported) {
     return (
@@ -367,8 +409,9 @@ function MediaBubble({ msg, isSelf, onView }: { msg: any; isSelf: boolean; onVie
   );
 }
 
-// ── VideoBubble ───────────────────────────────────────────────────────────────
-function VideoBubble({ msg }: { msg: any }) {
+// ── ZaloVideoBubble ──────────────────────────────────────────────────────────
+// Zalo videos have thumbnail preview from msg.content.thumb, play in external player
+function ZaloVideoBubble({ msg }: { msg: any }) {
   let remoteThumb = '';
   let videoLocalPath = '';
   let thumbLocalPath = '';
@@ -379,12 +422,14 @@ function VideoBubble({ msg }: { msg: any }) {
   try {
     const lp: Record<string, string> = typeof msg.local_paths === 'string'
       ? JSON.parse(msg.local_paths || '{}') : (msg.local_paths || {});
+    // Zalo stores: { thumb: "thumbnail_path", file: "video_path" }
     thumbLocalPath = lp.thumb || lp.main || '';
     videoLocalPath = lp.file || lp.video || '';
   } catch {}
 
   try {
     const parsed = JSON.parse(msg.content || '{}');
+    // Zalo video content: { href, thumb, params: { duration, video_width, video_height } }
     remoteThumb = parsed.thumb || '';
     const params = typeof parsed.params === 'string' ? JSON.parse(parsed.params) : (parsed.params || {});
     duration = params.duration ? Math.round(params.duration / 1000) : 0;
@@ -398,14 +443,17 @@ function VideoBubble({ msg }: { msg: any }) {
   const displayHeight = Math.min(200, Math.round(280 / aspectRatio));
   const formatDur = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const handlePlay = async (e: React.MouseEvent) => {
+  const videoUrl = videoLocalPath ? toLocalMediaUrl(videoLocalPath) : '';
+
+  const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (videoLocalPath) await ipc.file?.openPath(videoLocalPath);
+    // Zalo: open in external player (VLC, etc.)
+    if (videoLocalPath) ipc.file?.openPath(videoLocalPath);
   };
 
   return (
     <div className="relative group/video cursor-pointer rounded-xl overflow-hidden bg-black ring-1 ring-black/[0.12]"
-      style={{ width: 280, height: displayHeight || 160 }} onClick={handlePlay}>
+      style={{ width: '17.5rem', height: displayHeight || 160 }} onClick={handlePlay}>
       {thumbUrl
         ? <img src={thumbUrl} alt="video" className="w-full h-full object-cover"
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -426,10 +474,89 @@ function VideoBubble({ msg }: { msg: any }) {
           <span className="text-[11px] text-white font-medium bg-black/50 px-1.5 py-0.5 rounded">{formatDur(duration)}</span>
         )}
         {isHD && <span className="text-[11px] text-white font-bold bg-blue-600/70 px-1.5 py-0.5 rounded">HD</span>}
-        {!videoLocalPath && <span className="text-[11px] text-yellow-300 bg-black/50 px-1.5 py-0.5 rounded">Đang tải...</span>}
+        {!videoLocalPath && !videoUrl && <span className="text-[11px] text-yellow-300 bg-black/50 px-1.5 py-0.5 rounded">Đang tải...</span>}
       </div>
     </div>
   );
+}
+
+// ── FacebookVideoBubble ──────────────────────────────────────────────────────
+// Facebook videos have NO thumbnail, play inline <video> player
+function FacebookVideoBubble({ msg }: { msg: any }) {
+  const [showPlayer, setShowPlayer] = React.useState(false);
+  const [loadingFailed, setLoadingFailed] = React.useState(false);
+
+  // Compute videoLocalPath first (needed by hook below)
+  let videoLocalPath = '';
+  try {
+    const lp: Record<string, string> = typeof msg.local_paths === 'string'
+      ? JSON.parse(msg.local_paths || '{}') : (msg.local_paths || {});
+    videoLocalPath = lp.file || lp.video || lp.main || '';
+    if (!videoLocalPath) {
+      const attKey = Object.keys(lp).find(k => k.startsWith('att_'));
+      if (attKey) videoLocalPath = lp[attKey];
+    }
+    if (!videoLocalPath) {
+      try {
+        const atts = JSON.parse(msg.attachments || '[]');
+        if (atts[0]?.localPath) videoLocalPath = atts[0].localPath;
+      } catch {}
+    }
+  } catch {}
+
+  // Nếu sau 8s mà vẫn chưa có videoUrl, đánh dấu loadingFailed
+  React.useEffect(() => {
+    if (!videoLocalPath && !loadingFailed) {
+      const timer = setTimeout(() => setLoadingFailed(true), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [videoLocalPath]);
+
+  // Kiểm tra file có đúng là video không (tránh play thumbnail JPG)
+  const isPlayableVideo = videoLocalPath && /\.(mp4|webm|mov|avi|mkv|ogg|m4v)$/i.test(videoLocalPath);
+  const videoUrl = isPlayableVideo ? toLocalMediaUrl(videoLocalPath) : '';
+  console.log(`[FacebookVideoBubble] msgId=${msg.msg_id} local_paths=${msg.local_paths} videoLocalPath=${videoLocalPath} isPlayableVideo=${isPlayableVideo} videoUrl=${videoUrl}`);
+
+  // Inline player mode
+  if (showPlayer && videoUrl) {
+    return (
+      <div className="rounded-xl overflow-hidden bg-black ring-1 ring-black/[0.12]"
+        style={{ width: '17.5rem', maxHeight: '25rem' }}>
+        <video src={videoUrl} controls autoPlay
+          className="w-full" style={{ maxHeight: '25rem' }}
+          onError={() => setShowPlayer(false)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative group/video cursor-pointer rounded-xl overflow-hidden bg-black ring-1 ring-black/[0.12]"
+      style={{ width: '17.5rem', height: 160 }} onClick={() => { if (videoUrl) setShowPlayer(true); }}>
+      {/* No thumbnail for FB — always show video placeholder */}
+      <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-600">
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+      </div>
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/50"/>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-14 h-14 bg-black/60 backdrop-blur-sm rounded-full flex items-center justify-center group-hover/video:bg-black/80 transition-colors shadow-lg">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+      </div>
+      <div className="absolute bottom-2 left-2">
+        {!videoUrl && !loadingFailed && <span className="text-[11px] text-yellow-300 bg-black/50 px-1.5 py-0.5 rounded">Đang tải...</span>}
+        {!videoUrl && loadingFailed && <span className="text-[11px] text-red-400 bg-black/50 px-1.5 py-0.5 rounded">Tải thất bại</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── VideoBubble (router) ─────────────────────────────────────────────────────
+// Routes to correct implementation based on channel
+function VideoBubble({ msg }: { msg: any }) {
+  if (msg.channel === 'facebook') return <FacebookVideoBubble msg={msg} />;
+  return <ZaloVideoBubble msg={msg} />;
 }
 
 // ── VoiceBubble ───────────────────────────────────────────────────────────────
@@ -461,6 +588,14 @@ function VoiceBubble({ msg, isSelf }: { msg: any; isSelf: boolean }) {
     try {
       const lp = typeof msg.local_paths === 'string' ? JSON.parse(msg.local_paths || '{}') : (msg.local_paths || {});
       _localPath = lp.file || lp.voice || lp.main || '';
+
+      // Facebook: read audio path from attachments when local_paths not populated
+      if (!_localPath && msg.channel === 'facebook') {
+        try {
+          const atts = JSON.parse(msg.attachments || '[]');
+          if (atts[0]?.localPath) _localPath = atts[0].localPath;
+        } catch {}
+      }
     } catch {}
 
     return { voiceUrl: _voiceUrl, paramsDurationSec: _paramsDur, localPath: _localPath };
@@ -561,7 +696,7 @@ function VoiceBubble({ msg, isSelf }: { msg: any; isSelf: boolean }) {
                 <div
                   key={i}
                   className={`rounded-full transition-colors duration-100 ${filled ? 'bg-white' : 'bg-white/30'}`}
-                  style={{ width: 2, height: h * 1.5, minHeight: 3 }}
+                  style={{ width: '0.125rem', height: h * 1.5, minHeight: '0.1875rem' }}
                 />
               );
             })}
@@ -918,7 +1053,7 @@ function ContactCardBubble({ parsed, isSelf, onOpenProfile }: { parsed: any; isS
   const qrCodeUrl = String(desc.qrCodeUrl || '');
 
   const { contacts } = useChatStore();
-  const { activeAccountId } = useAccountStore();
+  const { activeAccountId, getActiveAccount } = useAccountStore();
   const contactList = activeAccountId ? (contacts[activeAccountId] || []) : [];
 
   const directUid = String(desc.uid || desc.userId || desc.id || parsed.userId || parsed.uid || parsed.id || '').trim();
@@ -947,6 +1082,12 @@ function ContactCardBubble({ parsed, isSelf, onOpenProfile }: { parsed: any; isS
     ''
   ).trim();
 
+  // Check friend status: ưu tiên isFr (từ Zalo contact list), fallback is_friend
+  const matchedContact = byDirectId || byParamsId || byPhone;
+  const isFriend = matchedContact ? (matchedContact.isFr === 1 || matchedContact.is_friend === 1) : false;
+
+  const [sendingReq, setSendingReq] = React.useState(false);
+
   const handleOpenQuickChat = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!resolvedUserId) return;
@@ -964,24 +1105,52 @@ function ContactCardBubble({ parsed, isSelf, onOpenProfile }: { parsed: any; isS
 
   const handleOpenProfile = (e: React.MouseEvent) => {
     if (!resolvedUserId || !onOpenProfile) return;
-    onOpenProfile(resolvedUserId, e);
+    // Chỉ mở profile khi click vào avatar, không block select text ở tên/SĐT
+    const target = e.target as HTMLElement;
+    if (target.closest('.card-avatar-area')) {
+      onOpenProfile(resolvedUserId, e);
+    }
+  };
+
+  const handleAddFriend = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!resolvedUserId || sendingReq) return;
+    setSendingReq(true);
+    try {
+      const account = getActiveAccount();
+      if (!account) return;
+      const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
+      const res = await ipc.zalo?.sendFriendRequest({ auth, userId: resolvedUserId, msg: 'Làm quen qua danh thiếp Zalo' });
+      if (res?.success || res?.response?.success) {
+        useAppStore.getState().showNotification('Đã gửi lời mời kết bạn', 'success');
+      } else {
+        useAppStore.getState().showNotification(res?.error || 'Gửi lời mời thất bại', 'error');
+      }
+    } catch (err: any) {
+      useAppStore.getState().showNotification('Gửi lời mời thất bại: ' + err.message, 'error');
+    } finally {
+      setSendingReq(false);
+    }
   };
 
   return (
     <div
-      className={`rounded-2xl max-w-[340px] overflow-hidden ${isSelf ? 'bg-blue-600/70 text-white' : 'bg-gray-700 text-gray-200'} ${resolvedUserId ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
-      onClick={handleOpenProfile}
+      className={`rounded-2xl max-w-[340px] ${isSelf ? 'bg-blue-600/70 text-white' : 'bg-gray-700 text-gray-200'}`}
     >
-      <div className="flex items-center gap-3.5 px-4 py-3.5">
-        <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-gray-600">
+      <div className="flex items-center gap-3.5 px-4 py-3.5 select-text">
+        {/* Avatar — click mở profile */}
+        <div
+          className={`card-avatar-area w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-gray-600 ${resolvedUserId && onOpenProfile ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''}`}
+          onClick={handleOpenProfile}
+        >
           {thumbUrl
             ? <img src={thumbUrl} alt={title} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
             : <div className="w-full h-full flex items-center justify-center text-white text-xl font-bold">{(title || 'U').charAt(0).toUpperCase()}</div>
           }
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-base font-semibold truncate">{title || 'Danh thiếp'}</p>
-          {phone && <p className={`text-sm mt-1 ${isSelf ? 'text-blue-100' : 'text-gray-300'}`}>{phone}</p>}
+          <p className="text-base font-semibold truncate select-text cursor-text">{title || 'Danh thiếp'}</p>
+          {phone && <PhoneDisplay phone={phone} className={`text-sm ${isSelf ? 'text-blue-100' : 'text-gray-300'}`} />}
           <p className={`text-xs mt-1 ${isSelf ? 'text-blue-200' : 'text-gray-500'}`}>Danh thiếp Zalo</p>
         </div>
         {qrCodeUrl && (
@@ -1006,6 +1175,31 @@ function ContactCardBubble({ parsed, isSelf, onOpenProfile }: { parsed: any; isS
             </svg>
             Gửi tin nhắn
           </button>
+          {/* Nút kết bạn — chỉ hiện nếu chưa là bạn bè */}
+          {!isFriend && !isSelf && (
+            <button
+              onClick={handleAddFriend}
+              disabled={sendingReq}
+              className={`mt-1.5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors border border-dashed ${
+                sendingReq
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-white/10'
+              } ${isSelf ? 'border-blue-400/30 text-blue-200' : 'border-gray-500/40 text-gray-300'}`}
+              title="Gửi lời mời kết bạn"
+            >
+              {sendingReq ? (
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                  <line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>
+                </svg>
+              )}
+              {sendingReq ? 'Đang gửi...' : 'Kết bạn'}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1351,9 +1545,11 @@ export function BankCardBubble({ msg }: { msg: any }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 export function MessageBubble({ msg, isSelf, senderName, onManage, onView, onOpenProfile }: MessageBubbleProps) {
   const [showRecalledOriginal, setShowRecalledOriginal] = React.useState(false);
+  const [showEditHistory, setShowEditHistory] = React.useState(false);
 
   const mt = msg.msg_type || '';
   const mc = msg.content || '';
+  console.log(`[MESSAGE_RENDER] msg_id=${msg.msg_id} msg_type=${mt} channel=${msg.channel} isSelf=${isSelf} sender_id=${msg.sender_id} content="${(mc||'').slice(0,30)}" local_paths=${typeof msg.local_paths === 'string' ? msg.local_paths.slice(0,80) : typeof msg.local_paths}`); // DEBUG FULL MSG
   const cls = isSelf
     ? 'bg-blue-600 text-white rounded-br-sm'
     : 'bg-gray-700 text-gray-200 rounded-bl-sm';
@@ -1489,11 +1685,53 @@ export function MessageBubble({ msg, isSelf, senderName, onManage, onView, onOpe
 
   // ── Text (default) ──
   const text = parseTxt(mc);
+  const isEdited = msg.is_edited === 1;
+  let editHistoryEntries: Array<{ oldBody: string; editedAt: number; editCount: number }> = [];
+  if (isEdited && msg.edit_history) {
+    try {
+      const parsed = JSON.parse(msg.edit_history);
+      if (Array.isArray(parsed)) {
+        editHistoryEntries = parsed;
+      }
+    } catch {}
+  }
   return (
     <div className={`flex ${isSelf ? 'justify-end' : 'justify-start'} mb-0.5`}>
       <div className={`px-3 py-2 rounded-2xl text-sm max-w-[280px] break-words whitespace-pre-wrap ${cls}`}>
         {text || '(Không có nội dung)'}
+        {isEdited && (
+          <>
+            <span className="ml-1.5 text-[10px] opacity-60 select-none font-normal">
+              (đã chỉnh sửa)
+            </span>
+            {editHistoryEntries.length > 0 && (
+              <button
+                onClick={() => setShowEditHistory(p => !p)}
+                className="ml-1.5 text-[10px] font-medium text-blue-300/70 hover:text-blue-300 transition-colors underline underline-offset-2 select-none pointer-events-auto"
+              >
+                {showEditHistory ? 'Ẩn' : 'Xem nội dung cũ'}
+              </button>
+            )}
+          </>
+        )}
       </div>
+      {showEditHistory && editHistoryEntries.length > 0 && (
+        <div className="w-full mt-1 space-y-1">
+          {editHistoryEntries.map((entry, i) => (
+            <div
+              key={i}
+              className={`px-3 py-1.5 rounded-lg text-xs opacity-60 ${isSelf ? 'bg-blue-700/30 mr-8' : 'bg-gray-600/30 ml-8'}`}
+            >
+              <div className="text-[10px] opacity-50 mb-0.5">
+                {new Date(entry.editedAt).toLocaleString('vi-VN')}
+              </div>
+              <div className="break-words whitespace-pre-wrap italic">
+                {parseTxt(entry.oldBody) || '(Không có nội dung)'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

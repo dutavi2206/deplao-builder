@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64, APP_VERSION } from '../constants';
+import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64, DOWNLOAD_URL_LINUX, APP_VERSION } from '../constants';
 
 interface FaqItem {
   question: string;
@@ -30,7 +30,7 @@ const faqs: FaqItem[] = [
   {
     question: 'Cài đặt trên hệ điều hành nào?',
     answer:
-      'Hiện tại Deplao hỗ trợ Windows và macOS. Bộ cài gọn nhẹ khoảng 150MB, khi vận hành thực tế chỉ tiêu thụ khoảng 500MB RAM nên chạy nhanh và ổn định.',
+      'Hiện tại Deplao hỗ trợ Windows, macOS và Ubuntu Linux. Bộ cài gọn nhẹ khoảng 150MB, khi vận hành thực tế chỉ tiêu thụ khoảng 500MB RAM nên chạy nhanh và ổn định.',
   },
   {
     question: 'Dữ liệu của tôi có an toàn không?',
@@ -200,6 +200,18 @@ const DownloadCTA: React.FC = () => {
                   <span>
                     <span className="block font-semibold">macOS Intel</span>
                     <span className="text-xs opacity-70">chip Intel series</span>
+                  </span>
+                </a>
+
+                <a
+                  href={DOWNLOAD_URL_LINUX}
+                  download
+                  className="btn-secondary inline-flex items-center gap-2.5 no-underline text-sm px-6 py-3.5"
+                >
+                  <span className="text-base">🐧</span>
+                  <span>
+                    <span className="block font-semibold">Ubuntu Linux</span>
+                    <span className="text-xs opacity-70">.AppImage · mọi distro</span>
                   </span>
                 </a>
               </div>

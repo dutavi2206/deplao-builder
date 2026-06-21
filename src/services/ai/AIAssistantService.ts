@@ -12,43 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import DatabaseService from '../database/DatabaseService';
 import IntegrationRegistry from '../integrations/IntegrationRegistry';
 import Logger from '../../utils/Logger';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type AIPlatform = 'openai' | 'gemini' | 'claude' | 'deepseek' | 'grok' | 'mistral';
-
-export interface AIAssistant {
-  id: string;
-  name: string;
-  platform: AIPlatform;
-  apiKey: string;          // Decrypted at runtime
-  model: string;
-  systemPrompt: string;
-  posIntegrationId: string | null;  // FK → integrations.id for product data
-  pinnedProductsJson: string;       // JSON array of {id,name,price,code,image} — user-selected products for AI context
-  maxTokens: number;
-  temperature: number;
-  contextMessageCount: number;
-  enabled: boolean;
-  isDefault: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface AIAssistantFile {
-  id: number;
-  assistantId: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  contentText: string;     // Extracted text for context injection
-  createdAt: number;
-}
-
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+import type { AIAssistant, AIAssistantFile, ChatMessage, AIPlatform } from '../../models';
 
 // ─── Encryption helpers ───────────────────────────────────────────────────────
 
@@ -77,12 +41,41 @@ function decryptApiKey(raw: string): string {
 
 function getOpenAICompatibleUrl(platform: string): string {
   switch (platform) {
-    case 'deepseek': return 'https://api.deepseek.com/v1/chat/completions';
-    case 'grok':     return 'https://api.x.ai/v1/chat/completions';
-    case 'mistral':  return 'https://api.mistral.ai/v1/chat/completions';
+    case 'deepseek':   return 'https://api.deepseek.com/v1/chat/completions';
+    case 'grok':       return 'https://api.x.ai/v1/chat/completions';
+    case 'mistral':    return 'https://api.mistral.ai/v1/chat/completions';
+    case '9router':    return 'http://localhost:20128/v1/chat/completions';
+    case 'openrouter': return 'https://openrouter.ai/api/v1/chat/completions';
     case 'openai':
-    default:         return 'https://api.openai.com/v1/chat/completions';
+    default:           return 'https://api.openai.com/v1/chat/completions';
   }
+}
+
+/** Resolve API URL — uses baseUrl override if set, otherwise falls back to default */
+function resolveApiUrl(platform: string, model: string, apiKey: string, baseUrl: string | null): string {
+  if (baseUrl) {
+    const base = baseUrl.replace(/\/+$/, '');
+    // If baseUrl already points to a full endpoint path, use it as-is
+    if (base.endsWith('/chat/completions') || base.match(/\/v\d+\/chat\/completions$/)) {
+      return base;
+    }
+    if (platform === 'gemini') {
+      return `${base}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    } else if (platform === 'claude') {
+      return `${base}/v1/messages`;
+    }
+    // Nếu baseUrl đã có version prefix (vd /v1), thêm trực tiếp /chat/completions
+    if (base.match(/\/v\d+$/)) {
+      return `${base}/chat/completions`;
+    }
+    return `${base}/v1/chat/completions`;
+  }
+  if (platform === 'gemini') {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  } else if (platform === 'claude') {
+    return 'https://api.anthropic.com/v1/messages';
+  }
+  return getOpenAICompatibleUrl(platform);
 }
 
 /** Normalize legacy/incorrect model names to current API model IDs */
@@ -175,12 +168,13 @@ class AIAssistantService {
       db.run(`UPDATE ai_assistants SET is_default = 0`);
     }
 
-    db.run(`INSERT INTO ai_assistants (id, name, platform, api_key_encrypted, model, system_prompt, pos_integration_id, pinned_products_json, max_tokens, temperature, context_message_count, enabled, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    db.run(`INSERT INTO ai_assistants (id, name, platform, api_key_encrypted, model, system_prompt, base_url, pos_integration_id, pinned_products_json, max_tokens, temperature, context_message_count, enabled, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name, platform = excluded.platform,
               api_key_encrypted = CASE WHEN excluded.api_key_encrypted = '***' THEN ai_assistants.api_key_encrypted ELSE excluded.api_key_encrypted END,
               model = excluded.model, system_prompt = excluded.system_prompt,
+              base_url = excluded.base_url,
               pos_integration_id = excluded.pos_integration_id,
               pinned_products_json = excluded.pinned_products_json,
               max_tokens = excluded.max_tokens, temperature = excluded.temperature,
@@ -189,7 +183,8 @@ class AIAssistantService {
               updated_at = excluded.updated_at`,
       [
         id, data.name, data.platform, encrypted, data.model,
-        data.systemPrompt || '', data.posIntegrationId || null,
+        data.systemPrompt || '', data.baseUrl || null,
+        data.posIntegrationId || null,
         pinnedJson,
         data.maxTokens || 1000, data.temperature ?? 0.7,
         data.contextMessageCount || 30,
@@ -360,12 +355,15 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     let totalTokens = 0;
 
     try {
+      const geminiApiUrl = resolveApiUrl('gemini', model, assistant.apiKey, assistant.baseUrl);
+      const claudeApiUrl = resolveApiUrl('claude', model, assistant.apiKey, assistant.baseUrl);
+      const openaiApiUrl = resolveApiUrl(assistant.platform, model, assistant.apiKey, assistant.baseUrl);
+
       if (assistant.platform === 'gemini') {
         const geminiContents = openaiMessagesToGemini(messages);
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keyPreview}`;
-        Logger.info(`[AIAssistant] Gemini URL (masked): ${geminiUrl}`);
+        Logger.info(`[AIAssistant] Gemini URL (masked): ${geminiApiUrl.replace(assistant.apiKey, '***')}`);
         const res = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${assistant.apiKey}`,
+          geminiApiUrl,
           {
             contents: geminiContents,
             generationConfig: { maxOutputTokens: maxTokens, temperature },
@@ -377,14 +375,13 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         completionTokens = res.data.usageMetadata?.candidatesTokenCount || 0;
         totalTokens = promptTokens + completionTokens;
       } else if (assistant.platform === 'claude') {
-        // Anthropic Claude Messages API
-        Logger.info(`[AIAssistant] Claude URL: https://api.anthropic.com/v1/messages`);
+        Logger.info(`[AIAssistant] Claude URL: ${claudeApiUrl}`);
         const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
         const claudeMessages = messages
           .filter(m => m.role !== 'system')
           .map(m => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: m.content }));
         const res = await axios.post(
-          'https://api.anthropic.com/v1/messages',
+          claudeApiUrl,
           {
             model,
             max_tokens: maxTokens,
@@ -405,13 +402,12 @@ VÍ DỤ ĐẦU RA ĐÚNG:
         completionTokens = res.data.usage?.output_tokens || 0;
         totalTokens = promptTokens + completionTokens;
       } else {
-        const apiUrl = getOpenAICompatibleUrl(assistant.platform);
-        Logger.info(`[AIAssistant] OpenAI-compat URL: ${apiUrl}, model: ${model}`);
+        Logger.info(`[AIAssistant] OpenAI-compat URL: ${openaiApiUrl}, model: ${model}`);
         const tokenParam = assistant.platform === 'openai'
           ? { max_completion_tokens: maxTokens }
           : { max_tokens: maxTokens };
         const res = await axios.post(
-          apiUrl,
+          openaiApiUrl,
           { model, messages, ...tokenParam, temperature },
           {
             headers: {
@@ -421,7 +417,19 @@ VÍ DỤ ĐẦU RA ĐÚNG:
             timeout: 60000,
           }
         );
-        result = res.data.choices?.[0]?.message?.content?.trim() || '';
+        // Parse response: support nhiều format khác ngoài OpenAI chuẩn
+        let rawContent = res.data.choices?.[0]?.message?.content;
+        if (!rawContent) rawContent = res.data.choices?.[0]?.text;           // Completions API
+        if (!rawContent) rawContent = res.data?.content;                     // Flat response
+        if (!rawContent) rawContent = res.data?.response;                    // Custom servers
+        if (!rawContent) {
+          // Log response structure để debug (chỉ field names, ko log value)
+          const topKeys = Object.keys(res.data || {}).join(',');
+          const choice0 = res.data?.choices?.[0];
+          const choiceKeys = choice0 ? Object.keys(choice0).join(',') : 'none';
+          Logger.warn(`[AIAssistant] callLLM response empty, topKeys=[${topKeys}], choice0Keys=[${choiceKeys}]`);
+        }
+        result = (rawContent || '').trim();
         promptTokens = res.data.usage?.prompt_tokens || 0;
         completionTokens = res.data.usage?.completion_tokens || 0;
         totalTokens = res.data.usage?.total_tokens || (promptTokens + completionTokens);
@@ -456,11 +464,23 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     if (!assistant || !assistant.enabled) return [];
 
     const contextCount = assistant.contextMessageCount || 30;
-    const systemPrompt = await this.buildSystemPrompt(assistant);
+    // KHÔNG dùng buildSystemPrompt() ở đây vì assistant system prompt có thể lấn át
+    // instruction suggest (đặc biệt với model FREE). Chỉ dùng instruction thuần.
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: `${systemPrompt}\n\n[Hướng dẫn] Dựa trên lịch sử hội thoại bên dưới, hãy gợi ý đúng 5 câu trả lời ngắn gọn, tự nhiên và phù hợp nhất cho người bán/hỗ trợ viên.\nBẮT BUỘC trả về đúng định dạng JSON array gồm 5 phần tử string, KHÔNG thêm bất kỳ text nào khác.\nVí dụ: ["Câu 1","Câu 2","Câu 3","Câu 4","Câu 5"]`
+        content: `Bạn là trợ lý gợi ý tin nhắn cho người bán hàng / chăm sóc khách hàng.
+
+NHIỆM VỤ: Dựa vào lịch sử hội thoại bên dưới, hãy gợi ý ĐÚNG 5 câu trả lời ngắn gọn, tự nhiên, phù hợp nhất.
+
+YÊU CẦU BẮT BUỘC:
+- Trả về JSON array gồm ĐÚNG 5 string, KHÔNG thêm text nào khác
+- Mỗi câu phải ngắn gọn (dưới 100 ký tự), tự nhiên như chat thật
+- Câu gợi ý phải khớp ngữ cảnh cuộc hội thoại
+- KHÔNG giải thích, KHÔNG thêm markdown, KHÔNG thêm lời chào dư thừa
+
+ĐỊNH DẠNG CHUẨN (chỉ trả về đúng format này, không thêm gì khác):
+["Câu gợi ý 1","Câu gợi ý 2","Câu gợi ý 3","Câu gợi ý 4","Câu gợi ý 5"]`
       },
       ...chatHistory.slice(-contextCount).map(m => ({
         role: m.role as 'user' | 'assistant',
@@ -469,7 +489,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
     ];
 
     try {
-      const { result } = await this.callLLM(assistant, messages, 500);
+      const { result } = await this.callLLM(assistant, messages, 1000);
       Logger.info(`[AIAssistant] getSuggestions raw result: ${result}`);
 
       // Try parsing as JSON array first (preferred format)
@@ -494,6 +514,15 @@ VÍ DỤ ĐẦU RA ĐÚNG:
           .map(s => s.replace(/^["']|["']$/g, ''))       // remove surrounding quotes
           .map(s => s.trim())
           .filter(s => s.length > 0);
+
+        // Fallback #2: nếu line-split không ra (vd text 1 đoạn), thử split theo câu
+        if (suggestions.length === 0 && result.length > 20) {
+          suggestions = result
+            .split(/[.!?]\s*/)
+            .map(s => s.trim())
+            .filter(s => s.length > 20)
+            .slice(0, 5);
+        }
       }
 
       Logger.info(`[AIAssistant] getSuggestions parsed ${suggestions.length} suggestions: ${JSON.stringify(suggestions)}`);
@@ -508,7 +537,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
    * Direct chat with AI assistant
    * @param structured - If true, use structured JSON output rules (text/image segments) same as workflow
    */
-  public async chat(assistantId: string, conversationMessages: Array<{ role: string; content: string }>, structured: boolean = false): Promise<{ result: string; totalTokens: number; promptTokens: number; completionTokens: number }> {
+  public async chat(assistantId: string, conversationMessages: Array<{ role: string; content: string }>, structured: boolean = false, maxTokensOverride?: number): Promise<{ result: string; totalTokens: number; promptTokens: number; completionTokens: number }> {
     const assistant = this.getAssistant(assistantId);
     if (!assistant) throw new Error('Trợ lý AI không tồn tại');
     if (!assistant.enabled) throw new Error('Trợ lý AI đã bị tắt');
@@ -522,7 +551,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
       })),
     ];
 
-    return await this.callLLM(assistant, messages);
+    return await this.callLLM(assistant, messages, maxTokensOverride);
   }
 
   /**
@@ -674,6 +703,7 @@ VÍ DỤ ĐẦU RA ĐÚNG:
       apiKey: decryptApiKey(row.api_key_encrypted),
       model: row.model,
       systemPrompt: row.system_prompt || '',
+      baseUrl: row.base_url || null,
       posIntegrationId: row.pos_integration_id || null,
       pinnedProductsJson: row.pinned_products_json || '[]',
       maxTokens: row.max_tokens || 1000,
@@ -688,4 +718,3 @@ VÍ DỤ ĐẦU RA ĐÚNG:
 }
 
 export default AIAssistantService;
-

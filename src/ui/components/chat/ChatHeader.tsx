@@ -6,7 +6,9 @@ import ipc from '@/lib/ipc';
 import { UserProfilePopup } from '../common/UserProfilePopup';
 import LabelPicker, { ActiveLabels, EditLabelsModal } from './LabelPicker';
 import useIsMobile from '@/hooks/useIsMobile';
-import ChannelBadge from '../common/ChannelBadge';
+import { toLocalMediaUrl } from '@/lib/localMedia';
+import { useChannelCapability } from '@/hooks/useChannelCapability';
+import { fetchContactInfo } from '@/hooks/useZaloEvents';
 import { extractUserProfile } from '../../../utils/profileUtils';
 
 interface HeaderLocalLabel {
@@ -27,6 +29,7 @@ export default function ChatHeader() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [searching, setSearching] = useState(false);
   const [currentResultIdx, setCurrentResultIdx] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -37,6 +40,11 @@ export default function ChatHeader() {
   const [editLabelsOpen, setEditLabelsOpen] = useState(false);
   const [loadingGroupMsgs, setLoadingGroupMsgs] = useState(false);
   const [aliasRefreshing, setAliasRefreshing] = useState(false);
+  const [refreshingFBInfo, setRefreshingFBInfo] = useState(false);
+  const [aliasEditOpen, setAliasEditOpen] = useState(false);
+  const [aliasEditPos, setAliasEditPos] = useState<{ x: number; y: number } | null>(null);
+  const [aliasInputValue, setAliasInputValue] = useState('');
+  const [aliasSaving, setAliasSaving] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -107,6 +115,51 @@ export default function ChatHeader() {
   }, [activeThreadId]);
 
 
+  // ── Auto-fetch user info khi vào hội thoại mới mà chưa có thông tin ──────
+  useEffect(() => {
+    if (!activeAccountId || !activeThreadId) return;
+    const isGroupThread = activeThreadType === 1;
+    if (isGroupThread) return;
+
+    const storeContacts = useChatStore.getState().contacts[activeAccountId] || [];
+    const ct = storeContacts.find((c) => c.contact_id === activeThreadId);
+    if (!ct) return;
+
+    const acc = getActiveAccount();
+    const channel = ct.channel || acc?.channel || 'zalo';
+    // Kiểm tra nếu chưa có tên thật (display_name = contact_id hoặc chỉ toàn số)
+    const hasRealName = !!(ct.display_name && ct.display_name !== activeThreadId && !/^\d+$/.test(ct.display_name));
+    const hasAvatar = !!ct.avatar_url;
+    if (hasRealName && hasAvatar) return; // Đã có đủ thông tin
+
+    if (channel === 'zalo') {
+      // Dùng fetchContactInfo đã có cache 7 ngày + xử lý alias
+      fetchContactInfo(activeAccountId, activeThreadId).catch(() => {});
+    } else if (channel === 'facebook') {
+      // Facebook: lấy tên + avatar từ HTML profile
+      ipc.fb?.getUserInfoFacebookHtml({ accountId: activeAccountId, userId: activeThreadId })
+        .then((res: any) => {
+          if (res?.success && (res.name || res.avatarUrl)) {
+            const patch: any = { contact_id: activeThreadId, channel: 'facebook' };
+            if (res.name) patch.display_name = res.name;
+            if (res.avatarUrl) patch.avatar_url = res.avatarUrl;
+            updateContact(activeAccountId, patch);
+          }
+        })
+        .catch(() => {});
+      // Refresh avatar từ CDN (FB avatar CDN thường hết hạn)
+      if (/^\d+$/.test(activeThreadId)) {
+        ipc.fb?.refreshContactAvatar({ accountId: activeAccountId, userId: activeThreadId })
+          .then((res: any) => {
+            if (res?.success && res.avatarUrl) {
+              updateContact(activeAccountId, { contact_id: activeThreadId, avatar_url: res.avatarUrl });
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [activeAccountId, activeThreadId, activeThreadType]);
+
   // ── Tải lại tin nhắn nhóm (getGroupChatHistory) / FB threads ────────────
   const handleReloadGroupMessages = useCallback(async () => {
     if (!activeAccountId || !activeThreadId || loadingGroupMsgs) return;
@@ -123,9 +176,26 @@ export default function ChatHeader() {
           showNotification(`Đã tải lại ${count} hội thoại Facebook`, 'success');
           // Reload contacts into store
           const contactsRes = await ipc.db?.getContacts(activeAccountId);
-          const contacts = contactsRes?.contacts ?? contactsRes ?? [];
+          const contacts: any[] = contactsRes?.contacts ?? contactsRes ?? [];
           if (contacts.length > 0) {
             useChatStore.getState().setContacts(activeAccountId, contacts);
+          }
+          // Refresh avatar cho Facebook user 1-1 hiện tại (CDN thường hết hn)
+          if (activeThreadId && activeThreadType !== 1 && /^\d+$/.test(activeThreadId)) {
+            ipc.fb.refreshContactAvatar({ accountId: activeAccountId, userId: activeThreadId })
+              .then(refreshRes => {
+                if (refreshRes.success && refreshRes.avatarUrl) {
+                  useChatStore.getState().updateContact(activeAccountId, {
+                    contact_id: activeThreadId,
+                    avatar_url: refreshRes.avatarUrl,
+                  });
+                  // Tải lại contacts vào store
+                  ipc.db?.getContacts(activeAccountId).then(cr => {
+                    const cl = cr?.contacts ?? cr ?? [];
+                    if (cl.length > 0) useChatStore.getState().setContacts(activeAccountId, cl);
+                  });
+                }
+              }).catch(() => {});
           }
         } else {
           showNotification(res?.error || 'Không thể tải hội thoại Facebook', 'error');
@@ -306,7 +376,42 @@ export default function ChatHeader() {
     }).catch(() => {});
   };
 
-  /** Reload alias (biệt danh) từ API — chỉ cho user DM trên kênh Zalo */
+  /** Mở popup sửa tên gợi nhớ */
+  const handleOpenAliasEdit = (e: React.MouseEvent) => {
+    if (!contact) return;
+    setAliasInputValue(contact?.alias || '');
+    setAliasEditPos({ x: e.clientX, y: e.clientY });
+    setAliasEditOpen(true);
+  };
+
+  /** Lưu alias mới qua API Zalo */
+  const handleSaveAlias = async () => {
+    if (!activeThreadId || !activeAccountId) return;
+    const acc = getActiveAccount();
+    if (!acc || (acc.channel || 'zalo') !== 'zalo') return;
+    const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
+    setAliasSaving(true);
+    try {
+      const trimmed = aliasInputValue.trim();
+      const res = await ipc.zalo?.changeFriendAlias({ auth, alias: trimmed, friendId: activeThreadId });
+      if (res && !res.success && res.error) {
+        showNotification('Lỗi cập nhật biệt danh: ' + res.error, 'error');
+        return;
+      }
+      updateContact(activeAccountId, { contact_id: activeThreadId, alias: trimmed });
+      ipc.db?.setContactAlias({
+        zaloId: activeAccountId, contactId: activeThreadId, alias: trimmed,
+      }).catch(() => {});
+      showNotification('Đã cập nhật tên gợi nhớ', 'success');
+      setAliasEditOpen(false);
+    } catch (e: any) {
+      showNotification('Lỗi: ' + (e.message || 'Không thể sửa tên gợi nhớ'), 'error');
+    } finally {
+      setAliasSaving(false);
+    }
+  };
+
+  /** Reload alias + user info từ API Zalo — lưu toàn bộ alias + cập nhật thông tin hội thoại hiện tại */
   const handleRefreshAlias = async () => {
     if (!activeThreadId || !activeAccountId || activeThreadType === 1) return;
     const acc = getActiveAccount();
@@ -314,9 +419,20 @@ export default function ChatHeader() {
     setAliasRefreshing(true);
     try {
       const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
-      const res = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
-      const rawProfile = res?.response?.changed_profiles?.[activeThreadId]
-        || res?.response?.data?.[activeThreadId];
+      // 1. Update toàn bộ alias từ getAliasList
+      const res = await ipc.zalo?.getAliasList({ auth, count: 5000 });
+      if (!res?.success) return;
+      const items: { userId: string; alias: string }[] = res?.response?.items || [];
+      for (const item of items) {
+        if (item.alias && item.userId) {
+          updateContact(activeAccountId, { contact_id: item.userId, alias: item.alias });
+          ipc.db?.setContactAlias({ zaloId: activeAccountId, contactId: item.userId, alias: item.alias }).catch(() => {});
+        }
+      }
+      // 2. Fetch full profile (tên, avatar, SĐT) cho hội thoại hiện tại
+      const infoRes = await ipc.zalo?.getUserInfo({ auth, userId: activeThreadId });
+      const rawProfile = infoRes?.response?.changed_profiles?.[activeThreadId]
+        || infoRes?.response?.data?.[activeThreadId];
       if (rawProfile) {
         const { displayName: newName, avatar: newAvatar, phone: newPhone, gender, birthday, alias: newAlias } = extractUserProfile(rawProfile);
         const patch: any = { contact_id: activeThreadId };
@@ -341,22 +457,64 @@ export default function ChatHeader() {
     }
   };
 
+  /** Reload thông tin Facebook từ HTML (tên + avatar) — chỉ cho 1-1 */
+  const handleRefreshFacebookInfo = async () => {
+    if (!activeThreadId || !activeAccountId || isGroup) return;
+    const acc = getActiveAccount();
+    if (!acc || (acc.channel || 'zalo') !== 'facebook') return;
+    setRefreshingFBInfo(true);
+    try {
+      const res = await ipc.fb?.getUserInfoFacebookHtml({ accountId: activeAccountId, userId: activeThreadId });
+      if (res?.success && (res.name || res.avatarUrl)) {
+        const patch: any = { contact_id: activeThreadId };
+        if (res.name) patch.display_name = res.name;
+        if (res.avatarUrl) patch.avatar_url = res.avatarUrl;
+        updateContact(activeAccountId, patch);
+        showNotification('Đã cập nhật thông tin từ Facebook', 'success');
+      } else {
+        showNotification(res?.error || 'Không thể lấy thông tin từ Facebook', 'error');
+      }
+    } catch (e: any) {
+      showNotification('Lỗi: ' + (e.message || 'Không thể làm mới'), 'error');
+    } finally {
+      setRefreshingFBInfo(false);
+    }
+  };
+
+  const channelCap = useChannelCapability();
+
   if (!activeThreadId || !activeAccountId) return null;
 
   const contactList = contacts[activeAccountId] || [];
   const contact = contactList.find((c) => c.contact_id === activeThreadId);
   // Ưu tiên alias → display_name
   const displayName = contact?.alias || contact?.display_name || activeThreadId;
-  const avatarUrl = contact?.avatar_url || '';
+  const avatarUrl = toLocalMediaUrl(contact?.avatar_url || '');
   const isGroup = activeThreadType === 1 || contact?.contact_type === 'group';
-  const activeChannel = contact?.channel || (useAccountStore.getState().accounts.find(a => a.zalo_id === activeAccountId)?.channel) || 'zalo';
-  const isFB = activeChannel === 'facebook';
+  const activeAccount = getActiveAccount();
+  const isFacebookDM = !isGroup && activeAccount?.channel === 'facebook';
   const groupInfo = isGroup ? (groupInfoCache[activeAccountId] || {})[activeThreadId] : undefined;
 
   // Render avatar: group composite or user avatar
   const renderAvatar = () => {
-    if (avatarUrl) {
-      return <img src={avatarUrl} alt={displayName} className={`w-9 h-9 rounded-full object-cover ${!isGroup ? 'hover:ring-2 hover:ring-blue-400 transition-all' : ''}`} />;
+    if (avatarUrl && !avatarFailed) {
+      return <img src={avatarUrl} alt={displayName} className={`w-9 h-9 rounded-full object-cover ${!isGroup ? 'hover:ring-2 hover:ring-blue-400 transition-all' : ''}`}
+        onError={() => {
+          setAvatarFailed(true);
+          // Auto-refresh avatar cho Facebook contacts (CDN hết hạn → 403)
+          if (activeAccountId && activeThreadId && (/^\d+$/.test(activeThreadId) || contact?.channel === 'facebook')) {
+            ipc.fb.refreshContactAvatar({ accountId: activeAccountId, userId: activeThreadId })
+              .then(res => {
+                if (res.success && res.avatarUrl) {
+                  updateContact(activeAccountId, {
+                    contact_id: activeThreadId,
+                    avatar_url: res.avatarUrl,
+                  });
+                  setAvatarFailed(false);
+                }
+              }).catch(() => {});
+          }
+        }} />;
     }
     if (isGroup) {
       const members = groupInfo?.members?.filter(m => m.avatar).slice(0, 4) || [];
@@ -467,10 +625,10 @@ export default function ChatHeader() {
                   </svg>
               }
             </button>
-            {/* Alias reload button — chỉ hiện cho user DM trên Zalo */}
-            {!isGroup && (contact?.channel || 'zalo') === 'zalo' && (
+            {/* Reload user info + alias button — chỉ hiện cho user DM có hỗ trợ alias */}
+            {!isGroup && channelCap.supportsAlias && (
               <button
-                title="Tải lại biệt danh"
+                title="Cập nhật thông tin + tên gợi nhớ"
                 onClick={handleRefreshAlias}
                 disabled={aliasRefreshing}
                 className="flex-shrink-0 text-gray-400 hover:text-white transition-colors"
@@ -482,10 +640,38 @@ export default function ChatHeader() {
                 </svg>
               </button>
             )}
+            {/* Edit alias button — sửa tên gợi nhớ trực tiếp */}
+            {!isGroup && channelCap.supportsAlias && (
+              <button
+                title="Sửa tên gợi nhớ"
+                onClick={handleOpenAliasEdit}
+                className="flex-shrink-0 text-gray-400 hover:text-white transition-colors ml-1"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+            )}
+            {/* Facebook info reload — chỉ cho FB 1-1 */}
+            {isFacebookDM && (
+              <button
+                title="Tải lại thông tin từ Facebook"
+                onClick={handleRefreshFacebookInfo}
+                disabled={refreshingFBInfo}
+                className="flex-shrink-0 text-gray-400 hover:text-white transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  className={refreshingFBInfo ? 'animate-spin' : ''}>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                </svg>
+              </button>
+            )}
           </div>
           {/* Active labels row — clickable to open label picker */}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            {(contact?.channel || 'zalo') !== 'facebook' && (
+            {channelCap.supportsLabel && (
             <ActiveLabels
               labels={allLabels[activeAccountId] || []}
               activeThreadId={activeThreadId}
@@ -528,10 +714,10 @@ export default function ChatHeader() {
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Tải lại tin nhắn nhóm (Zalo only) */}
-          {isGroup && !isFB && (
+          {/* Tải lại tin nhắn nhóm */}
+          {isGroup && channelCap.supportsGroupReload && (
             <button
-              title={isFB ? 'Tải lại hội thoại Facebook' : 'Tải lại tin nhắn nhóm (trong phiên này)'}
+              title="Tải lại tin nhắn nhóm (trong phiên này)"
               onClick={handleReloadGroupMessages}
               disabled={loadingGroupMsgs}
               className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${loadingGroupMsgs ? 'text-green-400 bg-gray-700' : 'hover:bg-gray-700 text-gray-400 hover:text-white'}`}
@@ -559,8 +745,9 @@ export default function ChatHeader() {
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
           </button>
-          {/* Bảng tin nhóm — chỉ hiện khi là nhóm Zalo */}
-          {isGroup && !isFB && (
+          {/* Tải tin nhắn cũ từ Facebook API (TẠM THỜI ẨN do API lỗi 500) */}
+          {/* Bảng tin nhóm */}
+          {isGroup && channelCap.supportsGroupBoard && (
             <button
               title="Bảng tin nhóm"
               onClick={() => setShowGroupBoard(!showGroupBoard)}
@@ -722,6 +909,19 @@ export default function ChatHeader() {
           }}
         />
       )}
+
+      {/* Alias edit popup — sửa tên gợi nhớ */}
+      {aliasEditOpen && aliasEditPos && contact && (
+        <AliasEditPopup
+          value={aliasInputValue}
+          onChange={setAliasInputValue}
+          saving={aliasSaving}
+          onSave={handleSaveAlias}
+          onClose={() => setAliasEditOpen(false)}
+          anchorX={aliasEditPos.x}
+          anchorY={aliasEditPos.y}
+        />
+      )}
     </div>
   );
 }
@@ -793,6 +993,83 @@ function HeaderLabelPickerPopup({ contactId, isGroup, x, y, labels, onAssign, on
         }}
         syncingLabels={syncingLabels}
       />
+    </div>
+  );
+}
+
+// ─── AliasEditPopup ───────────────────────────────────────────────────────────
+function AliasEditPopup({ value, onChange, saving, onSave, onClose, anchorX, anchorY }: {
+  value: string;
+  onChange: (v: string) => void;
+  saving: boolean;
+  onSave: () => void;
+  onClose: () => void;
+  anchorX: number;
+  anchorY: number;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const keyHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handler);
+      document.addEventListener('keydown', keyHandler);
+      inputRef.current?.focus();
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler);
+    };
+  }, [onClose]);
+
+  const top = Math.min(anchorY + 6, window.innerHeight - 140);
+  const left = Math.min(anchorX, window.innerWidth - 240);
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-[300] bg-gray-800 border border-gray-700 rounded-xl shadow-2xl min-w-[220px] p-3"
+      style={{ top: Math.max(8, top), left: Math.max(8, left) }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="text-xs text-gray-400 font-medium mb-2">Sửa tên gợi nhớ</div>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-2"
+        placeholder="Nhập tên gợi nhớ..."
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onSave();
+          if (e.key === 'Escape') onClose();
+        }}
+      />
+      <div className="flex items-center gap-2 justify-end">
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 text-xs text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+        >
+          Huỷ
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1"
+        >
+          {saving && (
+            <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          )}
+          Lưu
+        </button>
+      </div>
     </div>
   );
 }

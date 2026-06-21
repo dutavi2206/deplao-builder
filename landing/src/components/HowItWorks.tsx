@@ -5,7 +5,7 @@ const steps = [
     color: 'from-violet-600 to-purple-700',
     title: 'Tải & Cài Đặt',
     desc: 'Tải file cài đặt Deplao. Chạy installer và cài đặt trong vài giây. Không cần kỹ thuật phức tạp.',
-    detail: 'Windows · MacOS · NSIS Installer',
+    detail: 'Windows · macOS · Linux · AppImage',
   },
   {
     number: '02',

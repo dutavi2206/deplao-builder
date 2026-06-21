@@ -263,6 +263,29 @@ class HttpClientService {
         }
     }
 
+    // ─── Media upload (Employee → Boss) ──────────────────────────────
+
+    /**
+     * Upload a media file from Employee to Boss storage.
+     * Boss saves the file and returns its absolute path.
+     */
+    public async uploadMedia(base64: string, filename: string, zaloId?: string): Promise<{ success: boolean; bossPath?: string; error?: string }> {
+        if (!this.connected) {
+            return { success: false, error: 'Not connected' };
+        }
+
+        try {
+            return await this.httpPost(
+                `${this.bossUrl}/api/media/upload`,
+                { base64, filename, zaloId },
+                { Authorization: `Bearer ${this.token}` },
+                120000 // 2 phút cho ảnh lớn qua tunnel
+            );
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
+    }
+
     // ─── Callbacks ────────────────────────────────────────────────────
 
     public setOnStatusChange(cb: (connected: boolean, latency: number) => void): void {
@@ -325,16 +348,19 @@ class HttpClientService {
             const result = await this.httpGet(
                 `${this.bossUrl}/api/sync/full`,
                 { Authorization: `Bearer ${this.token}` },
-                120000
+                600000
             );
 
             if (!result?.success) {
-                return { success: false, error: result?.error || 'Sync failed' };
+                // Log chi tiết lý do sync thất bại
+                Logger.error(`[HttpClientService] Full sync failed: ${result?.error || 'unknown'}. Boss may have 100k+ messages - try increasing server timeout or reducing batch size.`);
+                return { success: false, error: result?.error || 'Sync failed - dữ liệu quá lớn, vui lòng thử lại' };
             }
 
             this.onSyncProgress?.('Đang xử lý dữ liệu...', 50);
             return { success: true, payload: result.payload, syncTs: result.syncTs };
         } catch (err: any) {
+            Logger.error(`[HttpClientService] Full sync exception: ${err.message}. Boss may have too many messages - consider paginated sync.`);
             return { success: false, error: err.message };
         }
     }
@@ -349,7 +375,7 @@ class HttpClientService {
             const result = await this.httpGet(
                 `${this.bossUrl}/api/sync/delta?sinceTs=${sinceTs}`,
                 { Authorization: `Bearer ${this.token}` },
-                60000
+                600000
             );
 
             if (!result?.success) {
@@ -608,6 +634,42 @@ class HttpClientService {
             return;
         }
 
+        // ── Contact alias — persist + forward to employee renderer ──
+        if (channel === 'db:contactAliasChanged' && data) {
+            try {
+                const DatabaseService = require('../database/DatabaseService').default;
+                const WorkspaceManager = require('../../utils/WorkspaceManager').default;
+                const db = DatabaseService.getInstance();
+
+                let targetDbPath: string | null = null;
+                if (this.workspaceId) {
+                    const ws = WorkspaceManager.getInstance().getWorkspaceById(this.workspaceId);
+                    if (ws) targetDbPath = WorkspaceManager.getInstance().resolveDbPath(ws.dbPath || 'deplao-tool.db');
+                }
+                const runOnWsDb = (fn: () => void) => {
+                    if (targetDbPath && targetDbPath !== db.getDbPath()) {
+                        db.withDbPath(targetDbPath, fn);
+                    } else {
+                        fn();
+                    }
+                };
+                runOnWsDb(() => {
+                    if (data.ownerZaloId && data.contactId) {
+                        db.setContactAlias(data.ownerZaloId, data.contactId, data.alias);
+                    }
+                });
+
+                // Forward to renderer when this employee workspace is active
+                const activeWsId = WorkspaceManager.getInstance().getActiveWorkspaceId();
+                if (activeWsId === this.workspaceId) {
+                    EventBroadcaster.sendDirect(channel, data);
+                }
+            } catch (err: any) {
+                Logger.warn(`[HttpClientService] contactAliasChanged error: ${err.message}`);
+            }
+            return;
+        }
+
         // Persist conversation-level events from Boss to employee's local DB
         // (labels, pins, quick messages, CRM, pinned conversations, contact settings)
         if (HttpClientService.FORWARD_CHANNELS.includes(channel)) {
@@ -750,16 +812,6 @@ class HttpClientService {
                 runOnWsDb(() => {
                     if (data.ownerZaloId && data.contactId && data.flags) {
                         db.setContactFlags(data.ownerZaloId, data.contactId, data.flags);
-                    }
-                });
-                return;
-            }
-
-            // ── Contact alias ──
-            if (channel === 'db:contactAliasChanged' && data) {
-                runOnWsDb(() => {
-                    if (data.ownerZaloId && data.contactId) {
-                        db.setContactAlias(data.ownerZaloId, data.contactId, data.alias);
                     }
                 });
                 return;

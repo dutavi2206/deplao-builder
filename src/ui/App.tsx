@@ -108,7 +108,7 @@ export default function App() {
     showGroupBoard, setShowGroupBoard,
     showIntegrationQuickPanel, toggleIntegrationQuickPanel,
     showAIQuickPanel, toggleAIQuickPanel,
-    openQuickChat, quickChatOpen, theme
+    openQuickChat, quickChatOpen, theme, fontSizeScale
   } = useAppStore();
   const { setAccounts, updateListenerActive, accounts } = useAccountStore();
   const { setContacts } = useChatStore();
@@ -124,6 +124,11 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  // ─── Sync font size scale to <html> element ──────────────────────────────
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${16 * fontSizeScale}px`;
+  }, [fontSizeScale]);
 
   // ─── Lock screen: check status on mount ─────────────────────────────────
   useEffect(() => {
@@ -601,12 +606,31 @@ export default function App() {
         try {
           const syncStatus = await ipc.sync?.getStatus();
           if (!syncStatus?.lastSyncTs) {
-            ipc.sync?.requestFullSync(syncAccountIds).then((res: any) => {
-              if (res?.success) {
-              } else {
+            // Retry up to 3 lần nếu full sync thất bại (timeout với 100k+ messages)
+            const maxRetries = 3;
+            const doSync = async (attempt: number) => {
+              try {
+                const res = await ipc.sync?.requestFullSync(syncAccountIds);
+                if (res?.success) {
+                  console.log(`[App] ✅ Full sync thành công (attempt ${attempt + 1})`);
+                } else if (attempt < maxRetries - 1) {
+                  console.warn(`[App] ⚠️ Full sync thất bại (attempt ${attempt + 1}): ${res?.error}. Retry sau 10s...`);
+                  await new Promise(r => setTimeout(r, 10000));
+                  return doSync(attempt + 1);
+                } else {
+                  console.error(`[App] ❌ Full sync thất bại sau ${maxRetries} lần: ${res?.error}`);
+                }
+              } catch (err) {
+                if (attempt < maxRetries - 1) {
+                  console.warn(`[App] ⚠️ Full sync exception (attempt ${attempt + 1}): ${err}. Retry sau 10s...`);
+                  await new Promise(r => setTimeout(r, 10000));
+                  return doSync(attempt + 1);
+                } else {
+                  console.error(`[App] ❌ Full sync exception sau ${maxRetries} lần:`, err);
+                }
               }
-            }).catch(() => {
-            });
+            };
+            doSync(0);
           }
         } catch { /* ignore sync status check failure */ }
       }
@@ -913,6 +937,24 @@ export default function App() {
                 ipc.login?.connectAccount(auth).catch(() => {});
               }
             }
+          }
+
+          // 4. Check + refresh avatar URLs for connected Zalo accounts
+          //    Avatar CDN URLs expire over time — verify validity and refresh if needed.
+          for (const acc of accountsRes.accounts) {
+            if ((acc.channel || 'zalo') !== 'zalo') continue;
+            if (!acc.isConnected) continue;
+            (async () => {
+              try {
+                const result = await ipc.login?.checkAndRefreshAvatar(acc.zalo_id);
+                if (result?.success && result.refreshed && result.avatar_url) {
+                  useAccountStore.getState().updateAccount(acc.zalo_id, {
+                    avatar_url: result.avatar_url,
+                    ...(result.full_name ? { full_name: result.full_name } : {}),
+                  });
+                }
+              } catch { /* fire-and-forget, don't block init */ }
+            })();
           }
 
           // 4b. Sync FB account connection status from main process
@@ -1278,7 +1320,7 @@ export default function App() {
               : 'bg-gray-900 border border-gray-700/70 shadow-black/60'
             }`}
           style={{
-            borderLeftWidth: 4,
+            borderLeftWidth: '0.25rem',
             borderLeftStyle: 'solid',
             borderLeftColor:
               notification.type === 'success' ? '#22c55e'

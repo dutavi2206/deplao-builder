@@ -36,8 +36,11 @@ export interface MessageItem {
   status: string;
   is_recalled?: number;  // 1 = tin nhắn đã thu hồi
   recalled_content?: string | null; // Nội dung gốc trước khi thu hồi
+  is_edited?: number;    // 1 = tin nhắn đã chỉnh sửa
+  edit_history?: string; // JSON array của các phiên bản cũ: [{oldBody, editedAt, editCount}]
   reactions?: ReactionData | Record<string, string> | string;
   quote_data?: string;
+  reply_to_id?: string | null;
   handled_by_employee?: string | null;  // employee_id of employee who sent/handled this message
   /** Kênh chat: 'zalo' | 'facebook'. Default 'zalo' cho backward compat */
   channel?: Channel;
@@ -107,6 +110,7 @@ interface ChatStore {
   removeMessage: (zaloId: string, threadId: string, msgId: string) => void;
   recallMessage: (zaloId: string, msgId: string, threadId?: string) => void;
   updateMessageReaction: (zaloId: string, threadId: string, msgId: string, userId: string, icon: string) => void;
+  updateMessageEdit: (zaloId: string, threadId: string, msgId: string, newText: string, editCount: number, timestampMs: number) => void;
   updateLocalPaths: (zaloId: string, threadId: string, msgId: string, localPaths: Record<string, string>) => void;
   updateMessageLocalPath: (zaloId: string, threadId: string, msgId: string, localPaths: Record<string, string>) => void;
   removeContact: (zaloId: string, contactId: string) => void;
@@ -214,6 +218,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const existingMsg = existing[dupIdx];
         if (message.handled_by_employee && !existingMsg.handled_by_employee) {
           const merged = { ...existingMsg, handled_by_employee: message.handled_by_employee };
+          const newMessages = [...existing];
+          newMessages[dupIdx] = merged;
+          return { messages: { ...state.messages, [key]: newMessages } };
+        }
+        // Merge quote_data nếu tin nhắn mới có (từ persistSentMessage broadcast sau MQTT echo)
+        // Fix race: MQTT echo đến trước persistSentMessage → message vào store thiếu quote_data
+        if (message.quote_data && !existingMsg.quote_data) {
+          const merged = { ...existingMsg, quote_data: message.quote_data };
           const newMessages = [...existing];
           newMessages[dupIdx] = merged;
           return { messages: { ...state.messages, [key]: newMessages } };
@@ -530,22 +542,103 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
   },
 
+  updateMessageEdit: (zaloId, threadId, msgId, newText, editCount, timestampMs) => {
+    set((state) => {
+      const updatedMessages = { ...state.messages };
+      const msgIdStr = String(msgId);
+      // threadId=0 ("0") is invalid — search all threads by msgId
+      const keysToCheck = threadId && threadId !== '0'
+        ? [`${zaloId}_${threadId}`]
+        : Object.keys(updatedMessages).filter(k => k.startsWith(zaloId + '_'));
+
+      let foundThreadKey = '';
+      for (const key of keysToCheck) {
+        const list = updatedMessages[key];
+        if (!list) continue;
+        const idx = list.findIndex(m =>
+          String(m.msg_id) === msgIdStr || String(m.cli_msg_id || '') === msgIdStr
+        );
+        if (idx !== -1) {
+          const updated = [...list];
+          const current = updated[idx];
+
+          // Preserve old content in edit_history
+          let historyArr: Array<{ oldBody: string; editedAt: number; editCount: number }> = [];
+          if (current.edit_history) {
+            try { historyArr = JSON.parse(current.edit_history); } catch { historyArr = []; }
+          }
+          // Only push if content actually changed
+          if (current.content !== newText && current.content) {
+            historyArr.push({
+              oldBody: current.content,
+              editedAt: timestampMs,
+              editCount: editCount,
+            });
+          }
+
+          updated[idx] = {
+            ...updated[idx],
+            content: newText,
+            is_edited: 1,
+            edit_history: JSON.stringify(historyArr),
+          };
+          updatedMessages[key] = updated;
+          foundThreadKey = key;
+          break;
+        }
+      }
+
+      const result: any = { messages: updatedMessages };
+
+      // If message was found and this is the last message, update contact preview
+      if (foundThreadKey) {
+        const actualThreadId = foundThreadKey.replace(`${zaloId}_`, '');
+        const contacts = state.contacts[zaloId] || [];
+        const contactIdx = contacts.findIndex(c => c.contact_id === actualThreadId);
+        if (contactIdx >= 0) {
+          const updatedContacts = [...contacts];
+          const lastMsg = (updatedMessages[foundThreadKey] || [])
+            .filter((m: MessageItem) => m.is_recalled !== 1 && m.msg_type !== 'system')
+            .sort((a: MessageItem, b: MessageItem) => b.timestamp - a.timestamp);
+          if (lastMsg.length > 0 && String(lastMsg[0].msg_id) === msgIdStr) {
+            updatedContacts[contactIdx] = {
+              ...updatedContacts[contactIdx],
+              last_message: newText?.slice(0, 100) || '[Đã chỉnh sửa]',
+              last_message_time: timestampMs || Date.now(),
+            };
+            result.contacts = { ...state.contacts, [zaloId]: updatedContacts };
+          }
+        }
+      }
+
+      return result;
+    });
+  },
+
   updateMessageLocalPath: (zaloId, threadId, msgId, localPaths) => {
     const key = `${zaloId}_${threadId}`;
     const msgIdStr = String(msgId);
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [key]: (state.messages[key] || []).map((m) => {
-          if (String(m.msg_id) !== msgIdStr) return m;
-          let existing: Record<string, string> = {};
-          if (typeof m.local_paths === 'string') {
-            try { existing = JSON.parse(m.local_paths || '{}'); } catch {}
-          }
-          return { ...m, local_paths: JSON.stringify({ ...existing, ...localPaths }) };
-        }),
-      },
-    }));
+    set((state) => {
+      const msgs = state.messages[key] || [];
+      const foundIdx = msgs.findIndex(m => String(m.msg_id) === msgIdStr);
+      if (foundIdx < 0) {
+        console.warn(`[chatStore] updateMessageLocalPath: message NOT FOUND key=${key} msgId=${msgIdStr} msgsLen=${msgs.length}`);
+        return state;
+      }
+      return {
+        messages: {
+          ...state.messages,
+          [key]: msgs.map((m) => {
+            if (String(m.msg_id) !== msgIdStr) return m;
+            let existing: Record<string, string> = {};
+            if (typeof m.local_paths === 'string') {
+              try { existing = JSON.parse(m.local_paths || '{}'); } catch {}
+            }
+            return { ...m, local_paths: JSON.stringify({ ...existing, ...localPaths }) };
+          }),
+        },
+      };
+    });
   },
 
   updateLocalPaths: (zaloId, threadId, msgId, localPaths) => {

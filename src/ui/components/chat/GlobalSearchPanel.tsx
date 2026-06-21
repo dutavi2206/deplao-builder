@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ipc from '@/lib/ipc';
 import GroupAvatar from '../common/GroupAvatar';
+import AddFriendModal from '../common/AddFriendModal';
+import { channelSupports } from '@/../configs/channelConfig';
 
 // ─── Vietnamese-aware normalization for fuzzy matching ────────────────────────
 function normalizeStr(s: string): string {
@@ -147,12 +149,13 @@ function formatTime(ts: number): string {
 }
 
 // ─── ContactResultItem ────────────────────────────────────────────────────────
-function ContactResultItem({ contact, query, onClick, groupInfoCache }: { 
-  contact: any; 
-  query: string; 
+function ContactResultItem({ contact, query, onClick, groupInfoCache }: {
+  contact: any;
+  query: string;
   onClick: () => void;
   groupInfoCache?: { [zaloId: string]: { [groupId: string]: any } };
 }) {
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const name = contact.alias || contact.display_name || contact.contact_id;
   const isGroup = contact.contact_type === 'group';
   const zaloId = contact.owner_zalo_id;
@@ -169,8 +172,16 @@ function ContactResultItem({ contact, query, onClick, groupInfoCache }: {
             size="search"
           />
         ) : (
-          contact.avatar_url
-            ? <img src={contact.avatar_url} alt={name} className="w-11 h-11 rounded-full object-cover" />
+          contact.avatar_url && !avatarFailed
+            ? <img src={contact.avatar_url} alt={name} className="w-11 h-11 rounded-full object-cover" onError={() => {
+                setAvatarFailed(true);
+                const ownerId = contact.owner_zalo_id;
+                if (ownerId && (contact.channel === 'facebook' || /^\d+$/.test(ownerId))) {
+                  ipc.fb.refreshContactAvatar({ accountId: ownerId, userId: contact.contact_id })
+                    .then(res => { if (res.success && res.avatarUrl) setAvatarFailed(false); })
+                    .catch(() => {});
+                }
+              }} />
             : <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-sm bg-blue-600">{(name || '?').charAt(0).toUpperCase()}</div>
         )}
       </div>
@@ -185,13 +196,14 @@ function ContactResultItem({ contact, query, onClick, groupInfoCache }: {
 }
 
 // ─── MessageResultItem ────────────────────────────────────────────────────────
-function MessageResultItem({ msg, query, contacts, onClick, groupInfoCache }: { 
-  msg: any; 
-  query: string; 
-  contacts: any[]; 
+function MessageResultItem({ msg, query, contacts, onClick, groupInfoCache }: {
+  msg: any;
+  query: string;
+  contacts: any[];
   onClick: () => void;
   groupInfoCache?: { [zaloId: string]: { [groupId: string]: any } };
 }) {
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const contact = contacts.find(c => c.contact_id === msg.thread_id);
   const convName = contact?.alias || contact?.display_name || msg.thread_id || 'Hội thoại';
   const preview = parsePreview(msg.content);
@@ -209,8 +221,16 @@ function MessageResultItem({ msg, query, contacts, onClick, groupInfoCache }: {
           size="search"
         />
       ) : (
-        contact?.avatar_url
-          ? <img src={contact.avatar_url} alt={convName} className="w-11 h-11 rounded-full object-cover flex-shrink-0" />
+        contact?.avatar_url && !avatarFailed
+          ? <img src={contact.avatar_url} alt={convName} className="w-11 h-11 rounded-full object-cover flex-shrink-0" onError={() => {
+              setAvatarFailed(true);
+              const ownerId = msg.owner_zalo_id;
+              if (ownerId) {
+                ipc.fb.refreshContactAvatar({ accountId: ownerId, userId: msg.thread_id })
+                  .then(res => { if (res.success && res.avatarUrl) setAvatarFailed(false); })
+                  .catch(() => {});
+              }
+            }} />
           : <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0 text-sm bg-blue-600">{(convName || '?').charAt(0).toUpperCase()}</div>
       )}
       <div className="flex-1 min-w-0">
@@ -300,6 +320,10 @@ export default function GlobalSearchPanel({
   const [phoneResult, setPhoneResult] = useState<any>(null);
   const [phoneSearching, setPhoneSearching] = useState(false);
   const [phonePendingAccounts, setPhonePendingAccounts] = useState(false); // merged mode: need to pick account
+
+  // Add friend modal state
+  const [addFriendModal, setAddFriendModal] = useState<{ userId: string; displayName: string; avatar: string } | null>(null);
+  const [sendingFriendReq, setSendingFriendReq] = useState(false);
 
   // Friends list from DB (includes friends without conversations)
   const [friendsList, setFriendsList] = useState<any[]>([]);
@@ -417,6 +441,9 @@ export default function GlobalSearchPanel({
 
   // ── Phone number search ──────────────────────────────────────────────────────
   const doPhoneSearch = async (acc: any, phone: string) => {
+    if (!channelSupports(acc.channel || 'zalo', 'supportsFriendRequest')) {
+      setPhoneResult({ _notFound: true }); setPhoneSearching(false); return;
+    }
     setPhoneSearching(true); setPhoneResult(null); setPhonePendingAccounts(false);
     try {
       const auth = { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent };
@@ -555,7 +582,15 @@ export default function GlobalSearchPanel({
             result={phoneResult}
             searching={phoneSearching}
             onOpen={() => phoneResult && handleOpenPhone(phoneResult)}
-            onAddFriend={() => {/* handled externally if needed */}}
+            onAddFriend={() => {
+              if (phoneResult && !phoneResult._notFound) {
+                setAddFriendModal({
+                  userId: phoneResult.uid,
+                  displayName: phoneResult.display_name || phoneResult.zalo_name || phoneResult.uid,
+                  avatar: phoneResult.avatar || '',
+                });
+              }
+            }}
           />
         )}
 
@@ -678,6 +713,35 @@ export default function GlobalSearchPanel({
           </div>
         )}
       </div>
+
+      {/* Add-friend compose modal */}
+      {addFriendModal && (
+        <AddFriendModal
+          displayName={addFriendModal.displayName}
+          avatar={addFriendModal.avatar}
+          sending={sendingFriendReq}
+          onConfirm={async (msg) => {
+            const targetZaloId = phoneResult?._searchZaloId || activeAccountId;
+            const acc = allAccounts.find(a => a.zalo_id === targetZaloId);
+            if (!acc) return;
+            setSendingFriendReq(true);
+            try {
+              await ipc.zalo?.sendFriendRequest({
+                auth: { cookies: acc.cookies, imei: acc.imei, userAgent: acc.user_agent },
+                userId: addFriendModal.userId,
+                msg,
+              });
+              setPhoneResult((p: any) => p?.uid === addFriendModal.userId ? { ...p, _sentRequest: true } : p);
+              setAddFriendModal(null);
+            } catch (err: any) {
+              alert('Gửi lời mời thất bại: ' + (err?.message || err));
+            } finally {
+              setSendingFriendReq(false);
+            }
+          }}
+          onClose={() => !sendingFriendReq && setAddFriendModal(null)}
+        />
+      )}
     </div>
   );
 }

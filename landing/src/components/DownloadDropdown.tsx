@@ -4,7 +4,7 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64 } from '../constants';
+import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64, DOWNLOAD_URL_LINUX } from '../constants';
 
 interface DownloadDropdownProps {
   /** Text hiển thị trên nút */
@@ -200,6 +200,25 @@ const DownloadDropdown: React.FC<DownloadDropdownProps> = ({
             <div>
               <div className="font-semibold">macOS Intel</div>
               <div className="text-xs text-slate-500">chip Intel series</div>
+            </div>
+          </a>
+
+          <div style={{ borderTop: '1px solid rgba(148,163,184,0.14)' }} />
+
+          {/* Linux */}
+          <a
+            href={DOWNLOAD_URL_LINUX}
+            download
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-3 px-4 py-3.5 text-sm text-slate-800 no-underline"
+            style={{ transition: 'background 0.15s' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(238,242,255,0.95)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <span className="text-xl">🐧</span>
+            <div>
+              <div className="font-semibold">Ubuntu Linux</div>
+              <div className="text-xs text-slate-500">.AppImage · mọi distro</div>
             </div>
           </a>
         </div>,

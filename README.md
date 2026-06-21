@@ -1,4 +1,5 @@
 # Deplao
+*Website giới thiệu*:  https://deplaoapp.com/
 
 <p>
   <strong>🌐 Language:</strong>
@@ -7,48 +8,77 @@
   🇬🇧 <a href="./README.en.md">English</a>
 </p>
 
-*Giới thiệu*:  https://babyvibe.github.io/deplao-builder/
 
 ---
 
-> Phần mềm desktop quản lý Zalo Đa tài khoản tích hợp CRM, ERP, POS, Workflow và AI Assistant giúp đội nhóm bán hàng, chăm sóc khách hàng và marketing trên Zalo vận hành tập trung trong một ứng dụng duy nhất.
+> Phần mềm desktop quản lý Zalo & Facebook cá nhân Đa tài khoản tích hợp CRM, ERP, POS, Workflow và AI Assistant giúp đội nhóm bán hàng, chăm sóc khách hàng và marketing trên Zalo và Facebook vận hành tập trung trong một ứng dụng duy nhất.
 
-[![Version](https://img.shields.io/badge/version-26.4.8-22c55e)](#)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-3b82f6)](#-runtime-requirements)
+[![Version](https://img.shields.io/badge/version-26.6.5-22c55e)](#)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6)](#-runtime-requirements)
 [![Electron](https://img.shields.io/badge/Electron-41-47848f?logo=electron&logoColor=white)](#)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](#)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](#)
 [![SQLite](https://img.shields.io/badge/SQLite-local--first-003b57?logo=sqlite&logoColor=white)](#)
 [![Vite](https://img.shields.io/badge/Vite-6-646cff?logo=vite&logoColor=white)](#)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?logo=node.js&logoColor=white)](#)
-[![License](https://img.shields.io/badge/license-ISC-f59e0b)](#)
+[![License](https://img.shields.io/badge/license-MIT-22c55e)](#giấy-phép)
 [![Support](https://img.shields.io/badge/support-GitHub_Issues-0ea5e9)](https://github.com/babyvibe/deplao-builder/issues)
 
+
+<p align="center">
+  <a href="#-tải-xuống">📥 Tải xuống</a> &nbsp;|&nbsp;
+  <a href="#-công-nghệ-ngôn-ngữ-sử-dụng">🛠️ Công nghệ</a> &nbsp;|&nbsp;
+  <a href="#cài-đặt">📦 Cài đặt</a> &nbsp;|&nbsp;
+  <a href="#-các-nhóm-tính-năng-chính">✨ Tính năng</a> &nbsp;|&nbsp;
+  <a href="#-bảo-mật-dữ-liệu">🔒 Bảo mật</a> &nbsp;|&nbsp;
+  <a href="#-giấy-phép">📝 MIT</a> &nbsp;|&nbsp;
+  <a href="#-liên-hệ">📞 Liên hệ</a>
+</p>
+
+---
 
 ## ⬇️ Tải xuống
 
 <table>
 <tr>
-<td align="center" width="33%">
-<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.4.8.exe">
-<img src="https://img.shields.io/badge/🪟_Windows-v26.4.8-0078d4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows" />
+<td align="center" width="50%">
+
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-Setup-26.6.5.exe">
+<img src="https://img.shields.io/badge/🪟_Windows_10/11-v26.6.5-0078d4?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows" />
 </a>
-<br>
-<sub>Deplao-Setup-26.4.8.exe</sub>
+
+<big><strong>Deplao-Setup-26.6.5.exe</strong></big>
+
 </td>
-<td align="center" width="33%">
-<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.8-arm64.dmg">
-<img src="https://img.shields.io/badge/🍎_macOS_M1+-v26.4.8-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Apple Silicon" />
+<td align="center" width="50%">
+
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.6.5-arm64.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_M1+-v26.6.5-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Apple Silicon" />
 </a>
-<br>
-<sub>Deplao-26.4.8-arm64.dmg</sub>
+
+<big><strong>Deplao-26.6.5-arm64.dmg</strong></big>
+
 </td>
-<td align="center" width="33%">
-<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.4.8.dmg">
-<img src="https://img.shields.io/badge/🍎_macOS_Intel-v26.4.8-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Intel" />
+</tr>
+<tr>
+<td align="center" width="50%">
+
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.6.5.AppImage">
+<img src="https://img.shields.io/badge/🐧_Ubuntu_Linux-v26.6.5-e95420?style=for-the-badge&logo=ubuntu&logoColor=white" alt="Download Ubuntu" />
 </a>
-<br>
-<sub>Deplao-26.4.8.dmg</sub>
+
+<big><strong>Deplao-26.6.5.AppImage</strong></big><br>
+<big>chạy mọi distro — <code>chmod +x</code> là dùng được</big>
+
+</td>
+<td align="center" width="50%">
+
+<a href="https://github.com/babyvibe/deplao-builder/releases/latest/download/Deplao-26.6.5.dmg">
+<img src="https://img.shields.io/badge/🍎_macOS_Intel-v26.6.5-555555?style=for-the-badge&logo=apple&logoColor=white" alt="Download macOS Intel" />
+</a>
+
+<big><strong>Deplao-26.6.5.dmg</strong></big>
+
 </td>
 </tr>
 </table>
@@ -58,7 +88,7 @@
 </p>
 
 <details>
-<summary>⚠️ Lưu ý khi mở file cài đặt (bị chặn bởi Windows / macOS)</summary>
+<summary>⚠️ Lưu ý khi mở file cài đặt (bị chặn bởi Windows / macOS / Linux)</summary>
 
 Do Deplao chưa được ký chứng chỉ (code signing) - nói thẳng ra là nghèo, nên hệ điều hành có thể hiển thị cảnh báo khi mở file. Bạn có thể làm theo hướng dẫn dưới đây:
 
@@ -89,6 +119,27 @@ Khi mở file `.dmg`, macOS có thể báo **"cannot be opened because it is fro
 2. Kéo xuống phần Security
 3. Nhấn **Open Anyway**
 
+---
+
+### 🐧 Ubuntu Linux (.AppImage)
+
+Sau khi tải file `.AppImage`:
+
+```bash
+chmod +x Deplao-*.AppImage
+./Deplao-*.AppImage
+```
+
+> Nếu gặp lỗi "FUSE: fuse2 not available", cài `libfuse2`:
+> ```bash
+> sudo apt install libfuse2
+> ```
+
+Hoặc cài bản `.deb`:
+```bash
+sudo dpkg -i Deplao_*_amd64.deb
+```
+
 </details>
 
 <p align="center">
@@ -99,7 +150,8 @@ Khi mở file `.dmg`, macOS có thể báo **"cannot be opened because it is fro
 
 Deplao hiện được xây dựng trên các công nghệ chính sau:
 
-- **Thư viện:** zca-js - https://github.com/RFS-ADRENO/zca-js
+- **Thư viện chính:** zca-js & fbchat-v2
+- **AI Gateway:** 9router
 - **Ngôn ngữ:** TypeScript, JavaScript, SQL, HTML, CSS
 - **Ứng dụng desktop:** Electron, React, Vite
 - **Giao diện:** Tailwind CSS, PostCSS, React Router
@@ -118,7 +170,7 @@ Deplao hiện được xây dựng trên các công nghệ chính sau:
 
 ### Yêu cầu
 
-- Windows 10/11 hoặc macOS
+- Windows 10/11, macOS (Apple Silicon), hoặc Ubuntu 20.04+
 - Node.js 18+ khuyến nghị
 - npm 9+
 
@@ -174,12 +226,13 @@ flowchart LR
     subgraph PKG["🚀 Đóng gói"]
         EB(("electron\nbuilder"))
         WIN("🪟 Windows\n.exe / dir")
-        MAC("🍎 macOS\n.dmg arm64 + x64")
+        MAC("🍎 macOS\n.dmg arm64")
+        LIN("🐧 Linux\n.AppImage · .deb")
     end
 
     E & S --> TSC --> DE
     R --> VITE --> D
-    DE & D --> EB --> WIN & MAC
+    DE & D --> EB --> WIN & MAC & LIN
 ```
 
 ---
@@ -415,7 +468,7 @@ Deplao phù hợp cho:
 ## 🧩 Các nhóm tính năng chính
 
 ### 1) Quản lý đa tài khoản & inbox tập trung
-- đăng nhập nhiều tài khoản Zalo bằng QR Code
+- đăng nhập nhiều tài khoản Zalo bằng QR Code, Facebook bằng tài khoản hoặc cookie
 - dashboard quản lý tài khoản trực quan
 - gộp nhiều tài khoản vào một inbox hợp nhất
 - tìm kiếm theo tên, biệt danh, số điện thoại
@@ -438,7 +491,7 @@ Deplao phù hợp cho:
 
 ### 4) Workflow tự động hóa
 - workflow kéo-thả không cần code
-- tích hợp trợ lý AI hỗ trợ tạo node chỉ bằng vài dòng prompt không cần kéo-thả
+- tích hợp trợ lý AI tạo node và workflow bằng câu lệnh (xem mục 7)
 - hỗ trợ trigger từ tin nhắn, nhãn, react, lịch cron, sự kiện nhóm...
 - action gửi tin, gửi ảnh/file, tìm user, quản lý nhóm, mute, forward, recall...
 - tích hợp logic, Google Sheets, AI, Telegram, Discord, Email, Notion và HTTP Request
@@ -447,7 +500,7 @@ Deplao phù hợp cho:
 ### 5) Tích hợp phục vụ bán hàng
 - POS: KiotViet, Haravan, Sapo, Nhanh.vn, Pancake POS
 - vận chuyển: GHN, GHTK
-- AI Assistant dùng để gợi ý câu trả lời, chat nhanh trực tiếp khi trò chuyện hoặc workflow
+- AI Assistant gợi ý trả lời, hỏi đáp trực tiếp trong hội thoại (xem mục 7)
 - dễ kết hợp thành quy trình bán hàng và chăm sóc khách hàng khép kín
 
 ### 6) Báo cáo, ERP và nhân viên
@@ -455,6 +508,13 @@ Deplao phù hợp cho:
 - ERP nội bộ gồm Task, Calendar, Notes
 - mô hình boss ↔ nhân viên và phân quyền module
 - hỗ trợ theo dõi hiệu suất làm việc theo từng người và từng giai đoạn
+
+### 7) 🤖 Trợ lý AI (AI Assistant)
+- gợi ý trả lời thông minh trong hội thoại Zalo và Facebook
+- hỏi đáp trực tiếp với AI ngay trong khung chat
+- tạo workflow tự động bằng câu lệnh tiếng Việt mà không cần kéo-thả
+- dùng node AI trong workflow để xây dựng chatbot trả lời tự động 24/7
+- hỗ trợ đa nền tảng AI: OpenAI, Claude, Gemini và 9router (AI gateway local)
 
 ## 🔒 Bảo mật & dữ liệu
 
@@ -479,8 +539,17 @@ Deplao ưu tiên kiến trúc chạy cục bộ trên máy người dùng:
 
 ## 🙏 Lời cảm ơn
 
-Deplao xin gửi lời cảm ơn đến dự án:  👉 https://github.com/RFS-ADRENO/zca-js
-Nhờ những đóng góp và nền tảng từ dự án này, Deplao mới có thể được hoàn thiện và ra mắt như ngày hôm nay. Rất trân trọng những giá trị mà cộng đồng open-source mang lại 💙
+Deplao xin gửi lời cảm ơn đến dự án:  
+👉 https://github.com/RFS-ADRENO/zca-js
+👉 https://github.com/m008v/fbchat-v2
+Nhờ những đóng góp và nền tảng từ dự án này 💙
+
+---
+
+## 📝 Giấy phép
+
+Dự án được phân phối dưới giấy phép **MIT**.  
+Xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 
 ---
 

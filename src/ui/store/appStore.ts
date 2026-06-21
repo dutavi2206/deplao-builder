@@ -102,11 +102,15 @@ interface AppStore {
    */
   mutedThreads: Record<string, Record<string, number>>;
   notifSettings: NotifSettings;
+  /** Per-account notification setting overrides: zaloId -> NotifSettings */
+  notifSettingsOverrides: Record<string, NotifSettings>;
   /** In-memory others cache: zaloId -> Set<contactId> */
   othersConversations: Record<string, Set<string>>;
 
   theme: AppTheme;
   setTheme: (theme: AppTheme) => void;
+  fontSizeScale: number;
+  setFontSizeScale: (scale: number) => void;
 
   setView: (view: AppView) => void;
   setLoading: (loading: boolean) => void;
@@ -148,6 +152,13 @@ interface AppStore {
   getMuteUntil: (zaloId: string, contactId: string) => number | undefined;
 
   setNotifSettings: (settings: Partial<NotifSettings>) => void;
+
+  /** Get notification settings for a specific account (override + fallback to global) */
+  getNotifSettingsForAccount: (zaloId: string) => NotifSettings;
+  /** Set per-account notification settings (persists to DB) */
+  setNotifSettingsForAccount: (zaloId: string, settings: Partial<NotifSettings>) => Promise<void>;
+  /** Load per-account notification settings from DB into store */
+  loadNotifSettingsForAccount: (zaloId: string) => Promise<void>;
 
   /** Move a contact to Others folder. Persists to DB + updates in-memory cache. */
   addToOthers: (zaloId: string, contactId: string) => void;
@@ -200,6 +211,23 @@ interface AppStore {
   hasCRMRequestUnseen: (zaloId: string) => boolean;
   hasAnyCRMRequestUnseen: () => boolean;
 }
+
+// ─── fontSizeScale persists in localStorage ─────────────────────────────────
+// Scale range: 0.75 (12px) → 1.5 (24px), step 0.0625 (1px), default 1 (16px)
+export const FONT_SCALE_MIN = 0.75;
+export const FONT_SCALE_MAX = 1.5;
+export const FONT_SCALE_STEP = 0.0625;
+const FONT_SCALE_KEY = 'app_fontSizeScale';
+const loadFontSizeScale = (): number => {
+  try {
+    const stored = localStorage.getItem(FONT_SCALE_KEY);
+    if (stored !== null) {
+      const parsed = Number(stored);
+      if (parsed >= FONT_SCALE_MIN && parsed <= FONT_SCALE_MAX) return parsed;
+    }
+  } catch {}
+  return 1;
+};
 
 // ─── theme persists in localStorage ─────────────────────────────────────────
 const loadTheme = (): AppTheme => {
@@ -316,7 +344,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   labelsFetchedAt: {},
   mutedThreads: {},
   notifSettings: loadNotifSettings(),
+  notifSettingsOverrides: {},
   theme: loadTheme(),
+  fontSizeScale: loadFontSizeScale(),
   groupInfoCache: {},
   othersConversations: {},
   mergedInboxMode: false,
@@ -551,9 +581,53 @@ export const useAppStore = create<AppStore>((set, get) => ({
     return { notifSettings: updated };
   }),
 
+  getNotifSettingsForAccount: (zaloId) => {
+    const state = get();
+    const override = state.notifSettingsOverrides[zaloId];
+    return override ? { ...state.notifSettings, ...override } : state.notifSettings;
+  },
+
+  setNotifSettingsForAccount: async (zaloId, settings) => {
+    const state = get();
+    const current = (state.notifSettingsOverrides[zaloId] || {}) as NotifSettings;
+    const updated: NotifSettings = {
+      soundEnabled: settings.soundEnabled ?? current.soundEnabled ?? true,
+      desktopEnabled: settings.desktopEnabled ?? current.desktopEnabled ?? true,
+      volume: settings.volume ?? current.volume ?? 0.6,
+    };
+    set((s) => ({
+      notifSettingsOverrides: { ...s.notifSettingsOverrides, [zaloId]: updated },
+    }));
+    try {
+      const ipc = (window as any).electronAPI?.db;
+      if (ipc?.setNotifSettings) {
+        await ipc.setNotifSettings(zaloId, updated);
+      }
+    } catch {}
+  },
+
+  loadNotifSettingsForAccount: async (zaloId) => {
+    try {
+      const ipc = (window as any).electronAPI?.db;
+      if (!ipc?.getNotifSettings) return;
+      const res = await ipc.getNotifSettings(zaloId);
+      if (res?.success && res.settings) {
+        set((s) => ({
+          notifSettingsOverrides: { ...s.notifSettingsOverrides, [zaloId]: res.settings },
+        }));
+      }
+    } catch {}
+  },
+
   setTheme: (theme) => {
     try { localStorage.setItem('app_theme', theme); } catch {}
     set({ theme });
+  },
+
+  setFontSizeScale: (scale) => {
+    try { localStorage.setItem(FONT_SCALE_KEY, String(scale)); } catch {}
+    set({ fontSizeScale: scale });
+    document.documentElement.style.fontSize = `${16 * scale}px`;
   },
 
   // ─── Others folder ───────────────────────────────────────────────────

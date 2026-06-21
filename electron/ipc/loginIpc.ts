@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { ipcMain, BrowserWindow } from 'electron';
 import LoginService from '../../src/services/login/LoginService';
 import DatabaseService from '../../src/services/database/DatabaseService';
@@ -227,6 +228,7 @@ export function registerLoginIpc(mainWindow: BrowserWindow | null) {
                 return {
                     ...acc,
                     proxy_id: (acc as any).proxy_id ?? null,
+                    listenerActive: !!(acc as any).listener_active,
                     isOnline: isFB
                         ? !!(fbUuid && FacebookConnectionManager.get(fbUuid)?.isConnected())
                         : ConnectionManager.isConnected(acc.zalo_id),
@@ -246,15 +248,31 @@ export function registerLoginIpc(mainWindow: BrowserWindow | null) {
     // ─── Xóa tài khoản ────────────────────────────────────────────────────
     ipcMain.handle('login:removeAccount', async (_event, { zaloId }) => {
         try {
-            const ZaloLoginHelper = require('../../src/utils/ZaloLoginHelper').default;
-            // Đánh dấu trước khi ngắt — ngăn auto-reconnect khi listener nhận close event
-            ZaloLoginHelper.markRemoved(zaloId);
+            // Check nếu là Facebook account → cleanup qua FacebookConnectionManager
+            const accounts = DatabaseService.getInstance().getAccounts();
+            const account = accounts.find((a: any) => a.zalo_id === zaloId);
+            const isFB = account?.channel === 'facebook';
 
-            // Disconnect
-            if (ConnectionManager.getConnection(zaloId)) {
-                await loginService.disconnectUser(zaloId);
+            if (isFB) {
+                // Facebook cleanup: tìm fb_account UUID → disconnect + xóa cookie + xóa fb_accounts
+                const fbAcc = DatabaseService.getInstance().getFBAccountByFacebookId(zaloId);
+                if (fbAcc?.id) {
+                    const FacebookConnectionManager = require('../../src/utils/FacebookConnectionManager').default;
+                    await FacebookConnectionManager.disconnect(fbAcc.id).catch(() => {});
+                    const { secureDelete } = require('../../src/services/secure/SecureSettingsService');
+                    secureDelete(`fb_cookie_${fbAcc.id}`);
+                    DatabaseService.getInstance().deleteFBAccount(fbAcc.id);
+                }
+            } else {
+                // Zalo cleanup (existing)
+                const ZaloLoginHelper = require('../../src/utils/ZaloLoginHelper').default;
+                ZaloLoginHelper.markRemoved(zaloId);
+                if (ConnectionManager.getConnection(zaloId)) {
+                    await loginService.disconnectUser(zaloId);
+                }
             }
-            // Mark as inactive in DB
+
+            // Mark as inactive in unified accounts table (cho cả Zalo và FB)
             DatabaseService.getInstance().deleteAccount(zaloId);
             return { success: true };
         } catch (error: any) {
@@ -300,6 +318,76 @@ export function registerLoginIpc(mainWindow: BrowserWindow | null) {
             return { success: true, results };
         } catch (error: any) {
             return { success: false, error: error.message };
+        }
+    });
+
+    // ─── Check + refresh avatar cho tài khoản Zalo ───────────────────────
+    // Kiểm tra avatar URL còn hạn không (HTTP HEAD). Nếu lỗi (403/etc) thì
+    // gọi Zalo API fetchAccountInfo() để lấy URL mới + cập nhật DB.
+    ipcMain.handle('login:checkAndRefreshAvatar', async (_event, { zaloId }) => {
+        try {
+            if (!zaloId) return { success: false, refreshed: false, error: 'Missing zaloId' };
+
+            const conn = ConnectionManager.getConnection(zaloId);
+            if (!conn || !conn.connected) {
+                return { success: false, refreshed: false, reason: 'not_connected' };
+            }
+
+            // Đọc account từ DB để lấy avatar_url hiện tại
+            const accounts = DatabaseService.getInstance().getAccounts();
+            const account = accounts.find((a: any) => a.zalo_id === zaloId);
+            if (!account) return { success: false, refreshed: false, error: 'Account not found' };
+
+            const currentAvatarUrl: string = account.avatar_url || '';
+
+            // Kiểm tra URL hiện tại nếu có
+            if (currentAvatarUrl) {
+                try {
+                    const headResp = await axios.head(currentAvatarUrl, {
+                        timeout: 5000,
+                        validateStatus: () => true,
+                        headers: { 'User-Agent': 'Mozilla/5.0' },
+                    });
+                    if (headResp.status === 200) {
+                        Logger.log(`[AvatarCheck] ${zaloId}: avatar URL still valid (${currentAvatarUrl.substring(0, 60)}...)`);
+                        return { success: true, refreshed: false };
+                    }
+                    Logger.log(`[AvatarCheck] ${zaloId}: avatar URL returned status ${headResp.status}, refreshing...`);
+                } catch (headErr: any) {
+                    Logger.log(`[AvatarCheck] ${zaloId}: avatar HEAD request failed (${headErr.message}), refreshing...`);
+                }
+            } else {
+                Logger.log(`[AvatarCheck] ${zaloId}: no avatar URL on file, fetching...`);
+            }
+
+            // URL expired hoặc không có → gọi Zalo API để refresh
+            const accountInfo = await conn.api.fetchAccountInfo();
+            const newAvatar = accountInfo?.profile?.avatar || (accountInfo as any)?.avatar || '';
+            const newName = accountInfo?.profile?.displayName || (accountInfo as any)?.displayName || '';
+
+            if (newAvatar && newAvatar !== currentAvatarUrl) {
+                // Update DB với avatar + name mới
+                const phone = accountInfo?.profile?.phoneNumber || (accountInfo as any)?.phoneNumber || '';
+                const bizPkgId = accountInfo?.profile?.bizPkg?.pkgId ?? (accountInfo as any)?.bizPkg?.pkgId ?? 0;
+                const isBusiness = bizPkgId > 0 ? 1 : 0;
+                DatabaseService.getInstance().updateAccountInfo(zaloId, phone, isBusiness, newAvatar, newName || undefined);
+
+                Logger.log(`[AvatarCheck] ${zaloId}: refreshed avatar: ${newAvatar.substring(0, 60)}...${newName ? ', name: ' + newName : ''}`);
+                return { success: true, refreshed: true, avatar_url: newAvatar, full_name: newName || undefined };
+            }
+
+            if (newAvatar && newAvatar === currentAvatarUrl) {
+                // URL giống nhau nhưng bây giờ vẫn valid → chỉ update timestamp
+                Logger.log(`[AvatarCheck] ${zaloId}: avatar unchanged, still valid`);
+                return { success: true, refreshed: false };
+            }
+
+            // fetchAccountInfo trả về avatar rỗng
+            Logger.warn(`[AvatarCheck] ${zaloId}: fetchAccountInfo returned empty avatar`);
+            return { success: true, refreshed: false, reason: 'empty_avatar_response' };
+        } catch (error: any) {
+            Logger.error(`[AvatarCheck] ${zaloId}: error: ${error.message}`);
+            return { success: false, refreshed: false, error: error.message };
         }
     });
 

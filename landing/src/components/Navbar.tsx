@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import logo from '../logo/icon.png';
-import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64 } from '../constants';
+import { DOWNLOAD_URL, DOWNLOAD_URL_MAC_ARM64, DOWNLOAD_URL_MAC_X64, DOWNLOAD_URL_LINUX } from '../constants';
 import DownloadDropdown from './DownloadDropdown';
 
 const navLinks = [
@@ -101,6 +101,10 @@ const Navbar: React.FC = () => {
             <a href={DOWNLOAD_URL_MAC_X64} download onClick={() => setMenuOpen(false)}
               className="flex items-center gap-3 py-2.5 px-3 rounded-2xl text-sm font-semibold text-slate-700 no-underline bg-slate-50 hover:bg-white border border-slate-200">
               <span>🍎</span> macOS Intel
+            </a>
+            <a href={DOWNLOAD_URL_LINUX} download onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-3 py-2.5 px-3 rounded-2xl text-sm font-semibold text-slate-700 no-underline bg-slate-50 hover:bg-white border border-slate-200">
+              <span>🐧</span> Ubuntu Linux
             </a>
           </div>
         </div>

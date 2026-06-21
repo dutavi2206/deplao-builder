@@ -69,7 +69,7 @@ async function loadAliases(zaloId: string) {
       const account = useAccountStore.getState().accounts.find((a) => a.zalo_id === zaloId);
       if (!account) return;
       const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
-      const res = await ipc.zalo?.getAliasList({ auth, count: 500 });
+      const res = await ipc.zalo?.getAliasList({ auth, count: 5000 });
       if (!res?.success) return;
       const items: { userId: string; alias: string }[] = res?.response?.items || [];
       for (const item of items) {
@@ -110,6 +110,16 @@ const REACTION_ICON_TO_EMOJI: Record<string, string> = {
 
 function reactionIconToEmoji(icon: string): string {
   return REACTION_ICON_TO_EMOJI[icon] || icon;
+}
+
+/**
+ * Lấy tên hiển thị của account từ accountStore.
+ * Dùng trong notification title để biết tin nhắn đến từ account nào.
+ */
+function getAccountDisplayName(zaloId: string): string {
+  const accounts = useAccountStore.getState().accounts;
+  const acc = accounts.find(a => a.zalo_id === zaloId || a.facebook_id === zaloId);
+  return acc?.full_name || acc?.zalo_id || zaloId;
 }
 
 /**
@@ -343,7 +353,7 @@ function extractContent(contentRaw: any, fallbackMessage?: string, msgType?: str
 }
 
 /** Background fetch thông tin contact, ưu tiên alias, cache 7 ngày */
-async function fetchContactInfo(zaloId: string, contactId: string): Promise<void> {
+export async function fetchContactInfo(zaloId: string, contactId: string): Promise<void> {
   const cacheKey = `${zaloId}__${contactId}`;
   const contacts = useChatStore.getState().contacts[zaloId] || [];
   const existing = contacts.find((c) => c.contact_id === contactId);
@@ -357,6 +367,8 @@ async function fetchContactInfo(zaloId: string, contactId: string): Promise<void
   try {
     const account = useAccountStore.getState().accounts.find((a) => a.zalo_id === zaloId);
     if (!account) return;
+    // Guard: fetchContactInfo chỉ dành cho Zalo contacts. FB contacts dùng getUserInfoFacebookHtml.
+    if ((account.channel || 'zalo') !== 'zalo') return;
     const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
     const res = await ipc.zalo?.getUserInfo({ auth, userId: contactId });
 
@@ -407,6 +419,8 @@ export async function refreshContactAlias(zaloId: string, contactId: string): Pr
   try {
     const account = useAccountStore.getState().accounts.find((a) => a.zalo_id === zaloId);
     if (!account) return;
+    // Guard: chỉ Zalo contacts mới có alias từ Zalo API
+    if ((account.channel || 'zalo') !== 'zalo') return;
     const auth = { cookies: account.cookies, imei: account.imei, userAgent: account.user_agent };
     const res = await ipc.zalo?.getUserInfo({ auth, userId: contactId });
     const rawProfile = res?.response?.changed_profiles?.[contactId]
@@ -647,7 +661,17 @@ export function useZaloEvents() {
       // 4. Trên mobile: hiện màn hình chat
       useAppStore.getState().setMobileShowChat(true);
 
-      // 5. Navigate đến đúng thread — dùng setTimeout ngắn để đảm bảo
+      // 5. Đảm bảo contacts cho account đã được load (để ConversationList hiển thị)
+      const existingContacts = useChatStore.getState().contacts[zaloId];
+      if (!existingContacts || existingContacts.length === 0) {
+        ipc.db?.getContacts(zaloId).then((res: any) => {
+          if (res?.contacts) {
+            useChatStore.getState().setContacts(zaloId, res.contacts);
+          }
+        }).catch(() => {});
+      }
+
+      // 6. Navigate đến đúng thread — dùng setTimeout ngắn để đảm bảo
       //    ConversationList effect đã chạy xong (nếu có switch account)
       const applyThread = () => {
         setActiveThread(threadId, threadType);
@@ -664,11 +688,43 @@ export function useZaloEvents() {
         applyThread();
       }
 
-      // 6. Clear unread, mark as read, update badge
+      // 7. Clear unread, mark as read, update badge
       ipc.db?.markAsRead({ zaloId, contactId: threadId }).catch(() => {});
       clearUnread(zaloId, threadId);
       sendSeenForThread(zaloId, threadId, threadType);
       ipc.app?.setBadge(Math.max(0, getFilteredUnreadCount()));
+
+      // 8. Auto-fetch user info cho thread nếu thiếu (sau khi contacts kịp load)
+      if (threadType !== 1) { // Không áp dụng cho group
+        const accountInfo = useAccountStore.getState().accounts.find(a => a.zalo_id === zaloId);
+        const channel = accountInfo?.channel || 'zalo';
+        setTimeout(() => {
+          const updatedContacts = useChatStore.getState().contacts[zaloId] || [];
+          const ct = updatedContacts.find((c: any) => c.contact_id === threadId);
+          if (!ct) return;
+
+          const hasRealName = !!(ct.display_name && ct.display_name !== threadId && !/^\d+$/.test(ct.display_name));
+          const hasAvatar = !!ct.avatar_url;
+          if (hasRealName && hasAvatar) return;
+
+          if (channel === 'zalo') {
+            fetchContactInfo(zaloId, threadId).catch(() => {});
+          } else if (channel === 'facebook') {
+            ipc.fb?.getUserInfoFacebookHtml({ accountId: zaloId, userId: threadId })
+              .then((res: any) => {
+                if (res?.success && (res.name || res.avatarUrl)) {
+                  const patch: any = { contact_id: threadId, channel: 'facebook' };
+                  if (res.name) patch.display_name = res.name;
+                  if (res.avatarUrl) patch.avatar_url = res.avatarUrl;
+                  useChatStore.getState().updateContact(zaloId, patch);
+                }
+              }).catch(() => {});
+            if (/^\d+$/.test(threadId)) {
+              ipc.fb?.refreshContactAvatar({ accountId: zaloId, userId: threadId }).catch(() => {});
+            }
+          }
+        }, 500); // Chờ contacts load từ DB
+      }
     });
     return unsub;
   }, []);
@@ -683,7 +739,7 @@ export function useZaloEvents() {
       const avatar: string = requester.avatar || '';
       const msg: string = requester.msg || '';
 
-      const { notifSettings } = useAppStore.getState();
+      const notifSettings = useAppStore.getState().getNotifSettingsForAccount(zaloId);
       const currentAppState = useAppStore.getState();
       const currentCRMState = useCRMStore.getState();
       const currentAccountState = useAccountStore.getState();
@@ -722,8 +778,9 @@ export function useZaloEvents() {
       } else {
         // ── App is NOT focused → desktop notification + flash taskbar ──
         if (notifSettings.desktopEnabled && notifAllowed) {
+          const accName = getAccountDisplayName(zaloId);
           showDesktopNotification(
-            `🤝 Lời mời kết bạn`,
+            `[${accName}] 🤝 Lời mời kết bạn`,
             `${displayName}${msg ? `: "${msg}"` : ' muốn kết bạn với bạn'}`,
             avatar || undefined,
             { zaloId, threadId: '__friend_requests__', threadType: 0 }
@@ -770,10 +827,11 @@ export function useZaloEvents() {
       const displayName = requester?.displayName || userId;
       const avatar: string = requester?.avatar || '';
 
-      const { notifSettings } = useAppStore.getState();
-      if (notifSettings.desktopEnabled) {
+      const notifForAccount = useAppStore.getState().getNotifSettingsForAccount(zaloId);
+      if (notifForAccount.desktopEnabled) {
+        const accName = getAccountDisplayName(zaloId);
         showDesktopNotification(
-          `✅ Đã chấp nhận kết bạn`,
+          `[${accName}] ✅ Đã chấp nhận kết bạn`,
           `${displayName} đã chấp nhận lời mời kết bạn của bạn`,
           avatar || undefined,
           { zaloId, threadId: userId, threadType: 0 }
@@ -1017,7 +1075,8 @@ export function useZaloEvents() {
 
         // ─── Sound + Desktop notification ───────────────────────────────
         const appState = useAppStore.getState();
-        const { notifSettings, isMuted, isInOthers } = appState;
+        const { isMuted, isInOthers, getNotifSettingsForAccount } = appState;
+        const notifSettings = getNotifSettingsForAccount(zaloId);
         // Notification.permission đồng bộ với macOS system notification authorization (Electron 20+)
         // Khi user tắt notification trên macOS → permission = 'denied' → không phát âm thanh/hiện popup
         const notifAllowed = !('Notification' in window) || Notification.permission === 'granted';
@@ -1032,8 +1091,9 @@ export function useZaloEvents() {
               const contactName = nameOverride || ctact?.alias || ctact?.display_name || alias || realName || threadId;
               const contactAvatar = avatarOverride || ctact?.avatar_url || undefined;
               const msgText = buildMessagePreview(contentRaw, rawMsgType, isImage, content).slice(0, 120);
+              const notifTitle = `[${getAccountDisplayName(zaloId)}] ${contactName}`;
               showDesktopNotification(
-                contactName,
+                notifTitle,
                 msgText,
                 contactAvatar,
                 { zaloId, threadId, threadType: isGroup ? 1 : 0 }
@@ -1565,6 +1625,13 @@ export function useZaloEvents() {
     }));
     unsubs.push(ipc.on('db:contactAliasChanged', (data: any) => {
       window.dispatchEvent(new CustomEvent('ui:contactAliasChanged', { detail: data }));
+      // Cập nhật Zustand store ngay lập tức — quan trọng cho employee nhận từ relay
+      if (data?.ownerZaloId && data?.contactId && data?.alias !== undefined) {
+        useChatStore.getState().updateContact(data.ownerZaloId, {
+          contact_id: data.contactId,
+          alias: data.alias,
+        });
+      }
     }));
 
     return () => { unsubs.forEach(u => u?.()); };

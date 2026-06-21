@@ -33,6 +33,7 @@ declare global {
         getAccounts: () => Promise<any>;
         removeAccount: (zaloId: string) => Promise<any>;
         checkHealth: (zaloIds: string | string[]) => Promise<{ success: boolean; results: Array<{ zaloId: string; healthy: boolean; readyState: number | null; reason?: string }>; error?: string }>;
+        checkAndRefreshAvatar: (zaloId: string) => Promise<{ success: boolean; refreshed: boolean; avatar_url?: string; full_name?: string; reason?: string; error?: string }>;
         requestOldMessages: (zaloId: string) => Promise<{ success: boolean; error?: string }>;
       };
       zalo: {
@@ -131,6 +132,7 @@ declare global {
         getMessages: (params: any) => Promise<any>;
         getMessagesAround: (params: { zaloId: string; threadId: string; timestamp: number; limit?: number }) => Promise<any>;
         getContacts: (zaloId: string) => Promise<any>;
+        searchContactByPhone: (params: { zaloId: string; phone: string }) => Promise<{ success: boolean; contact: any | null }>;
         searchMessages: (params: any) => Promise<any>;
         getMediaMessages: (params: { zaloId: string; threadId?: string; limit?: number; offset?: number }) => Promise<any>;
         getFileMessages: (params: { zaloId: string; threadId: string; limit?: number; offset?: number }) => Promise<any>;
@@ -204,6 +206,9 @@ declare global {
         // Local Pinned Conversations
         getLocalPinnedConversations: (params: { zaloId: string }) => Promise<{ success: boolean; threadIds: string[] }>;
         setLocalPinnedConversation: (params: { zaloId: string; threadId: string; isPinned: boolean }) => Promise<{ success: boolean }>;
+        // Per-account Notification Settings
+        getNotifSettings: (zaloId: string) => Promise<{ success: boolean; settings: any | null; error?: string }>;
+        setNotifSettings: (zaloId: string, settings: any) => Promise<{ success: boolean; error?: string }>;
         // Local Labels
         getLocalLabels: (params: { zaloId?: string }) => Promise<{ success: boolean; labels: any[] }>;
         upsertLocalLabel: (params: { label: { id?: number; name: string; color: string; textColor?: string; emoji: string; pageIds: string; isActive?: number; sortOrder?: number; shortcut?: string } }) => Promise<{ success: boolean; id?: number; error?: string }>;
@@ -297,11 +302,12 @@ declare global {
         openPath: (filePath: string) => Promise<any>;
         showItemInFolder: (filePath: string) => Promise<any>;
         saveAs: (params: { localPath?: string; remoteUrl?: string; defaultName: string; zaloId?: string; cookiesJson?: string; userAgent?: string }) => Promise<{ success: boolean; canceled?: boolean; savedPath?: string; error?: string }>;
-        saveTempBlob: (params: { base64: string; ext: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+        saveTempBlob: (params: { base64: string; ext: string; filename?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
         getVideoMeta: (params: { filePath: string }) => Promise<{ success: boolean; thumbPath: string; duration: number; width: number; height: number; error?: string }>;
         readImageAsBase64: (params: { localPath?: string; remoteUrl?: string }) => Promise<{ success: boolean; base64?: string; mimeType?: string; error?: string }>;
         repairImage: (params: { zaloId: string; msgId: string; threadId?: string; localPath?: string; remoteUrl?: string }) => Promise<{ success: boolean; newLocalPath?: string; error?: string }>;
         validateLocalImages: (items: Array<{ zaloId: string; msgId: string; threadId?: string; localPath: string; remoteUrl?: string }>) => Promise<{ success: boolean; corrupted: Array<{ zaloId: string; msgId: string; threadId?: string; localPath: string; remoteUrl?: string; reason: string }> }>;
+        captureScreenshot: () => Promise<{ success: boolean; screenshots?: Array<{ name: string; id: string; displayId: string; thumbnail: string; width: number; height: number }>; error?: string }>;
       };
       app: {
         setBadge: (count: number) => void;
@@ -321,6 +327,7 @@ declare global {
         setBiometric: (params: { enabled: boolean }) => Promise<{ success: boolean; error?: string }>;
         biometricUnlock: () => Promise<{ success: boolean; error?: string }>;
       };
+
       on: (channel: string, callback: (...args: any[]) => void) => () => void;
       removeAllListeners: (channel: string) => void;
       update: {
@@ -361,7 +368,7 @@ declare global {
         uploadFile:      (assistantId: string, filePath: string) => Promise<{ success: boolean; id?: number; fileName?: string; error?: string }>;
         removeFile:      (fileId: number) => Promise<{ success: boolean; error?: string }>;
         suggest:         (assistantId: string, chatHistory: any[]) => Promise<{ success: boolean; suggestions: string[]; error?: string }>;
-        chat:            (assistantId: string, messages: any[], structured?: boolean) => Promise<{ success: boolean; result?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number; error?: string }>;
+        chat:            (assistantId: string, messages: any[], structured?: boolean, maxTokens?: number) => Promise<{ success: boolean; result?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number; error?: string }>;
         getAccountAssistant:  (zaloId: string, role: string) => Promise<{ success: boolean; assistant?: any | null; error?: string }>;
         setAccountAssistant:  (zaloId: string, role: string, assistantId: string | null) => Promise<{ success: boolean; error?: string }>;
         getAccountAssistants: (zaloId: string) => Promise<{ success: boolean; suggestion?: string | null; panel?: string | null; error?: string }>;
@@ -438,7 +445,8 @@ declare global {
       };
       // ─── Facebook ─────────────────────────────────────────────────────
       fb: {
-        addAccount:           (params: { cookie: string }) => Promise<{ success: boolean; account?: any; facebookId?: string; name?: string; error?: string }>;
+        addAccount:           (params: { cookie: string; proxyId?: number | null }) => Promise<{ success: boolean; account?: any; facebookId?: string; name?: string; error?: string }>;
+        addAccountWithCredentials: (params: { username: string; password: string; twoFASecret?: string; proxyId?: number | null }) => Promise<{ success: boolean; need2FA?: boolean; account?: any; facebookId?: string; name?: string; error?: string; errorTitle?: string }>;
         removeAccount:        (params: { accountId: string }) => Promise<{ success: boolean; error?: string }>;
         updateCookie:         (params: { accountId: string; cookie: string }) => Promise<{ success: boolean; error?: string }>;
         refreshProfile:       (params: { accountId: string }) => Promise<{ success: boolean; name?: string; avatarUrl?: string; error?: string, facebookId?: string }>;
@@ -447,7 +455,7 @@ declare global {
         disconnect:           (params: { accountId: string }) => Promise<{ success: boolean; error?: string }>;
         checkHealth:          (params: { accountId: string }) => Promise<{ success: boolean; alive: boolean; listenerConnected: boolean; reason?: string }>;
         sendMessage:          (params: { accountId: string; threadId: string; body: string; options?: any }) => Promise<{ success: boolean; messageId?: string; error?: string }>;
-        sendAttachment:       (params: { accountId: string; threadId: string; filePath: string; body?: string; typeChat?: 'user' | null }) => Promise<{ success: boolean; error?: string }>;
+        sendAttachment:       (params: { accountId: string; threadId: string; filePath: string; body?: string; typeChat?: 'user' | null; fileType?: 'image' | 'video' | 'audio' | 'file' }) => Promise<{ success: boolean; error?: string }>;
         sendAttachments:      (params: { accountId: string; threadId: string; filePaths: string[]; body?: string; typeChat?: 'user' | null }) => Promise<{ success: boolean; uploadedCount?: number; totalCount?: number; error?: string }>;
         unsendMessage:        (params: { accountId: string; messageId: string }) => Promise<{ success: boolean; error?: string }>;
         addReaction:          (params: { accountId: string; messageId: string; emoji: string; action: 'add' | 'remove' }) => Promise<{ success: boolean; error?: string }>;
@@ -458,6 +466,41 @@ declare global {
         changeThreadEmoji:    (params: { accountId: string; threadId: string; emoji: string }) => Promise<{ success: boolean; error?: string }>;
         changeNickname:       (params: { accountId: string; threadId: string; userId: string; nickname: string }) => Promise<{ success: boolean; error?: string }>;
         loginWithCredentials: (params: { username: string; password: string; twoFASecret?: string }) => Promise<{ success: boolean; result?: any; error?: string }>;
+        fetchThreadMessages: (params: { accountId: string; threadId: string; limit?: number; beforeCursor?: string | null }) => Promise<{ success: boolean; messages?: any[]; cursor?: { before: string | null; hasMore: boolean } | null; error?: string }>;
+        refreshContactAvatar: (params: { accountId: string; userId: string }) => Promise<{ success: boolean; avatarUrl?: string; error?: string }>;
+        sendTyping:           (params: { accountId: string; threadId: string; isTyping: boolean; isGroup?: boolean }) => Promise<{ success: boolean; error?: string }>;
+        blockUser:            (params: { accountId: string; userId: string }) => Promise<{ success: boolean; error?: string }>;
+        unblockUser:          (params: { accountId: string; userId: string }) => Promise<{ success: boolean; error?: string }>;
+        forwardMessage:       (params: { accountId: string; messageId: string; targetThreadId: string; isGroup?: boolean }) => Promise<{ success: boolean; error?: string }>;
+        editMessage:          (params: { accountId: string; messageId: string; text: string }) => Promise<{ success: boolean; error?: string }>;
+        createPoll:           (params: { accountId: string; threadId: string; question: string; options: string[] }) => Promise<{ success: boolean; pollId?: string; error?: string }>;
+        getUserInfoFacebookHtml: (params: { accountId: string; userId: string }) => Promise<{ success: boolean; name?: string; avatarUrl?: string; error?: string }>;
+        // ─── Scan Data ────────────────────────────────────────────────
+        scanGroupMembers:     (params: { accountId: string; groupId: string; cursor?: string | null }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string }>;
+        scanGroupKeyword:     (params: { accountId: string; keyword: string; cursor?: string | null; filters?: string[]; bsid?: string; tsid?: string }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string; _nextBsid?: string; _nextTsid?: string }>;
+        scanFanpageKeyword:   (params: { accountId: string; keyword: string; cursor?: string | null; filters?: string[]; bsid?: string; tsid?: string }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string; _nextBsid?: string; _nextTsid?: string }>;
+        scanPostTimeline:     (params: { accountId: string; sourceId: string; sourceType: 'profile' | 'fanpage' | 'group'; cursor?: string | null }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string }>;
+        scanPostComments:     (params: { accountId: string; postId: string; cursor?: string | null }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string }>;
+        scanPostKeyword:      (params: { accountId: string; keyword: string; cursor?: string | null; filters?: string[]; bsid?: string; tsid?: string }) => Promise<{ success: boolean; items: any[]; pageInfo: { endCursor: string | null; hasNextPage: boolean }; error?: string; _nextBsid?: string; _nextTsid?: string }>;
+        // Batch
+        scanGroupMembersBatch: (params: { accountId: string; groupIds: string[]; threadCount?: number }) => Promise<{ success: boolean; items: any[]; errors: string[]; error?: string }>;
+        scanPostCommentsBatch: (params: { accountId: string; postIds: string[]; threadCount?: number }) => Promise<{ success: boolean; items: any[]; errors: string[]; error?: string }>;
+        // Scan history
+        saveScanLog:  (params: { accountId: string; tabId?: string; tabName?: string; scanType: string; input: string; status: 'success' | 'error'; itemsCount?: number; error?: string; requestPayload?: string; responsePreview?: string; requestHeaders?: string; responseHeaders?: string; docId?: string; threadCount?: number }) => Promise<{ success: boolean; id?: number; error?: string }>;
+        getScanLogs:  (params: { accountId: string; tabId?: string; limit?: number; offset?: number }) => Promise<{ success: boolean; logs: any[]; total: number; error?: string }>;
+        // Tab management
+        scanSaveTab:        (params: { id: string; accountId: string; name: string; scanType: string; config: string; status?: string; itemsCount?: number }) => Promise<{ success: boolean; error?: string }>;
+        scanGetTabs:        (params: { accountId: string; status?: string; limit?: number; offset?: number }) => Promise<{ success: boolean; tabs: any[]; total: number; error?: string }>;
+        scanGetTab:         (params: { id: string }) => Promise<{ success: boolean; tab?: any; error?: string }>;
+        scanUpdateTabStatus:(params: { id: string; status: string }) => Promise<{ success: boolean; error?: string }>;
+        scanTouchTab:       (params: { id: string }) => Promise<{ success: boolean; error?: string }>;
+        scanDeleteTab:      (params: { id: string }) => Promise<{ success: boolean; error?: string }>;
+        scanSaveTabData:    (params: { tabId: string; items: any[]; pageInfo: any }) => Promise<{ success: boolean; id?: number; error?: string }>;
+        scanGetTabData:     (params: { tabId: string }) => Promise<{ success: boolean; items: any[]; pageInfo: any; error?: string }>;
+        scanSaveRequestLog: (params: { tabId: string; requestPayload: string; responsePreview: string; requestHeaders?: string; responseHeaders?: string; status: string; error?: string; itemsCount?: number }) => Promise<{ success: boolean; id?: number; error?: string }>;
+        scanGetRequestLogs: (params: { tabId: string; limit?: number; offset?: number }) => Promise<{ success: boolean; logs: any[]; total: number; error?: string }>;
+        scanGetStats:       (params: { accountId: string }) => Promise<{ success: boolean; totalTabs: number; totalItems: number; successCount: number; errorCount: number; byType: Record<string, number>; topTabs: Array<{ id: string; name: string; itemsCount: number }>; error?: string }>;
+        scanResetCache:       () => Promise<{ success: boolean; error?: string }>;
       };
       // ─── Proxy ───────────────────────────────────────────────────────────
       proxy: {
@@ -541,6 +584,8 @@ declare global {
       notifyMarkRead:      (params: any) => Promise<{ success: boolean; error?: string }>;
       notifyMarkAllRead:   (params: any) => Promise<{ success: boolean; error?: string }>;
       notifyUnreadCount:   (params: any) => Promise<{ success: boolean; count: number; error?: string }>;
+      notifyDelete:        (params: any) => Promise<{ success: boolean; error?: string }>;
+      notifyDeleteAll:     (params: any) => Promise<{ success: boolean; error?: string }>;
     };
   };
 }
@@ -622,6 +667,7 @@ export const ipc = {
   relay: window.electronAPI?.relay,
   fb: window.electronAPI?.fb,
   proxy: window.electronAPI?.proxy,
+
   erp,
   lockScreen: window.electronAPI?.lockScreen,
   on: window.electronAPI?.on,
