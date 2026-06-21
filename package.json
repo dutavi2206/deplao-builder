@@ -140,7 +140,9 @@
     },
     "protocols": {
       "name": "Deplao Deep Link",
-      "schemes": ["deplao"]
+      "schemes": [
+        "deplao"
+      ]
     },
     "nsis": {
       "oneClick": false,
